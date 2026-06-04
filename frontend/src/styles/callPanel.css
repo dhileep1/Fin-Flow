@@ -1,0 +1,151 @@
+/* ============================================================
+   CALL PANEL — UNIFIED PREMIUM DESIGN
+   Professional Single-Table UI with Vertical Dividers
+   ============================================================ */
+
+.call-panel {
+    max-width: 1600px;
+    width: 98%;
+    margin: 0 auto;
+    animation: panelEnter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes panelEnter {
+    from { opacity: 0; transform: translateY(15px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.call-panel-main-container {
+    background: #ffffff;
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    box-shadow: 
+        0 4px 6px -1px rgba(0, 0, 0, 0.05),
+        0 20px 40px -12px rgba(15, 23, 42, 0.08);
+    border-radius: 1.5rem;
+    overflow: hidden;
+    margin-top: 2rem;
+}
+
+.call-panel-unified-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+/* --- Headers --- */
+.section-headers th {
+    background: #f1f5f9;
+    padding: 0.75rem 1rem;
+    color: #475569;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    text-align: center;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.column-headers th {
+    background: #f8fafc;
+    padding: 1rem 1rem;
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 2px solid #f1f5f9;
+}
+
+/* --- Vertical Dividers --- */
+.section-divider {
+    border-right: 2px solid #f1f5f9 !important;
+}
+
+/* --- Body Cells --- */
+.call-panel-unified-table tbody tr {
+    height: 72px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.call-panel-unified-table tbody tr:hover {
+    background: #f8fafc !important;
+}
+
+.call-panel-unified-table tbody td {
+    padding: 0 1rem;
+    border-bottom: 1px solid #f1f5f9;
+    vertical-align: middle;
+    font-size: 13px;
+}
+
+/* --- Premium Badges --- */
+.badge {
+    border: none !important;
+    font-size: 10px !important;
+    font-weight: 900 !important;
+    letter-spacing: 0.08em !important;
+    padding: 6px 12px !important;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    border-radius: 9999px;
+    display: inline-flex;
+}
+
+.badge-status {
+    width: 100px;
+    justify-content: center;
+}
+
+.badge-success { background: #ecfdf5; color: #059669; }
+.badge-overdue { background: #fffbeb; color: #d97706; }
+.badge-defaulter { background: #fef2f2; color: #dc2626; }
+.badge-neutral { background: #f8fafc; color: #475569; border: 1px solid #e2e8f0 !important; }
+
+.badge-promise { background: #f0fdf4; color: #16a34a; border: 1px solid #bcf0da !important; }
+.badge-noanswer { background: #fffbeb; color: #d97706; border: 1px solid #fef3c7 !important; }
+.badge-notcalled { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0 !important; }
+
+/* --- Action Button --- */
+.btn-premium-action {
+    background: #ffffff;
+    border: 1px solid #d2d4d9 !important;
+    color: #1e293b;
+    border-radius: 12px;
+    padding: 0 0.75rem;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: 700;
+    font-size: 11px;
+    transition: all 0.2s ease;
+}
+
+.btn-premium-action:hover {
+    background: #0f172a;
+    border-color: #0f172a !important;
+    color: #ffffff;
+}
+
+.btn-premium-action:hover svg {
+    opacity: 1 !important;
+    fill: #ffffff !important;
+}
+
+/* --- Contacted Today State --- */
+.row-contacted-today {
+    opacity: 0.65;
+    filter: grayscale(0.6);
+    background: #f8fafc;
+}
+
+.row-contacted-today:hover {
+    opacity: 1;
+    filter: grayscale(0);
+}
+
+/* --- Empty State --- */
+.empty-state-inline {
+    padding: 4rem;
+    text-align: center;
+}

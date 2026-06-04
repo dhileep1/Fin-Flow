@@ -1,0 +1,116 @@
+const loanService = require('../services/loan.service');
+const prisma = require('../config/database');
+const { logAudit } = require('../services/audit.service');
+const { v4: uuidv4 } = require('uuid');
+
+async function createLoan(req, res, next) {
+    try {
+        const { customerId, vehicleId, principalAmount, tenureMonths, monthlyInterestRate, startDate, assignedStaffId, guarantors } = req.body;
+
+        if (!customerId || !vehicleId || !principalAmount || !tenureMonths || !monthlyInterestRate || !startDate) {
+            return res.status(400).json({ error: 'Missing required fields: customerId, vehicleId, principalAmount, tenureMonths, monthlyInterestRate, startDate' });
+        }
+
+        const loan = await loanService.createLoan({
+            orgId: req.orgId,
+            customerId,
+            vehicleId,
+            assignedStaffId,
+            principalAmount,
+            tenureMonths: Number(tenureMonths),
+            monthlyInterestRate,
+            startDate,
+            userId: req.user.id,
+        });
+
+        // Add guarantors if provided
+        if (guarantors && Array.isArray(guarantors) && guarantors.length > 0) {
+            for (const g of guarantors) {
+                await prisma.guarantor.create({
+                    data: {
+                        id: uuidv4(),
+                        orgId: req.orgId,
+                        loanId: loan.id,
+                        name: g.name,
+                        phone: g.phone,
+                        aadharNumber: g.aadharNumber,
+                        address: g.address,
+                        photoUrl: g.photoUrl,
+                    },
+                });
+            }
+        }
+
+        // Re-fetch with guarantors
+        const fullLoan = await loanService.getLoanById(req.orgId, loan.id);
+        res.status(201).json(fullLoan);
+    } catch (err) {
+        next(err);
+    }
+}
+
+async function getLoan(req, res, next) {
+    try {
+        const loan = await loanService.getLoanById(req.orgId, req.params.id);
+        if (!loan) return res.status(404).json({ error: 'Loan not found' });
+        res.json(loan);
+    } catch (err) {
+        next(err);
+    }
+}
+
+async function listLoans(req, res, next) {
+    try {
+        const { status, customerId, assignedStaffId, page, limit } = req.query;
+        const result = await loanService.listLoans(req.orgId, {
+            status,
+            customerId,
+            assignedStaffId,
+            page: Number(page) || 1,
+            limit: Number(limit) || 25,
+        });
+        res.json(result);
+    } catch (err) {
+        next(err);
+    }
+}
+
+async function getDues(req, res, next) {
+    try {
+        const { filter, loanId, limit = 50, page = 1 } = req.query;
+        const where = { orgId: req.orgId };
+        if (loanId) where.loanId = loanId;
+
+        if (filter === 'pending') where.status = 'pending';
+        else if (filter === 'paid') where.status = 'paid';
+        else if (filter === 'upcoming') where.status = 'upcoming';
+        else if (filter === 'overdue') {
+            where.status = { not: 'paid' };
+            where.dueDate = { lt: new Date() };
+        }
+
+        const [dues, total] = await Promise.all([
+            prisma.loanDue.findMany({
+                where,
+                include: {
+                    loan: {
+                        include: {
+                            customer: { select: { name: true, phone: true } },
+                            vehicle: { select: { vehicleNumber: true } },
+                        },
+                    },
+                },
+                orderBy: { dueDate: 'asc' },
+                skip: (Number(page) - 1) * Number(limit),
+                take: Number(limit),
+            }),
+            prisma.loanDue.count({ where }),
+        ]);
+
+        res.json({ dues, total, page: Number(page), limit: Number(limit) });
+    } catch (err) {
+        next(err);
+    }
+}
+
+module.exports = { createLoan, getLoan, listLoans, getDues };

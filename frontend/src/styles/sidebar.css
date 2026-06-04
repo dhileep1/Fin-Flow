@@ -1,0 +1,365 @@
+/* ============================================================
+   SIDEBAR — Collapsible Dark-Slate Navigation
+   ============================================================ */
+
+/* --- Core --- */
+.sidebar {
+    position: fixed;
+    top: var(--header-height);
+    left: 0;
+    bottom: 0;
+    background: var(--color-nav-bg);
+    border-right: 1px solid var(--color-nav-border);
+    display: flex;
+    flex-direction: column;
+    z-index: 100;
+    overflow: hidden;
+    transition: width var(--transition-sidebar);
+}
+
+.sidebar-expanded {
+    width: var(--sidebar-expanded);
+}
+
+.sidebar-collapsed {
+    width: var(--sidebar-collapsed);
+}
+
+
+
+/* --- Navigation --- */
+.sidebar-nav {
+    flex: 1;
+    padding: var(--space-3) 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* Section grouping */
+.sidebar-section {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0 var(--space-2);
+}
+
+.sidebar-section + .sidebar-section {
+    margin-top: var(--space-2);
+}
+
+.sidebar-section-label {
+    display: block;
+    padding: var(--space-3) var(--space-3) var(--space-1);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-nav-section-label);
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.sidebar-section-divider {
+    height: 1px;
+    background: var(--color-nav-border);
+    margin: var(--space-2) var(--space-3);
+}
+
+/* --- Nav Item --- */
+.nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    color: var(--color-nav-text);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    text-decoration: none;
+    transition: all var(--transition-fast);
+    cursor: pointer;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+    font-family: var(--font-family);
+    min-height: 44px; /* Touch target */
+    line-height: 1.3;
+}
+
+.nav-item:hover {
+    background: var(--color-nav-bg-hover);
+    color: var(--color-nav-active-text);
+}
+
+.nav-item:focus-visible {
+    outline: 2px solid var(--brand-accent);
+    outline-offset: -2px;
+}
+
+/* Active state: left accent bar instead of full background */
+.nav-item-active {
+    color: var(--color-nav-active-text);
+    background: transparent;
+    box-shadow: inset 4px 0 0 var(--brand-accent);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+.nav-item-active:hover {
+    background: var(--color-nav-bg-hover);
+}
+
+/* --- Icon --- */
+.nav-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+}
+
+/* --- Label --- */
+.nav-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: opacity var(--transition-sidebar), width var(--transition-sidebar);
+    opacity: 1;
+}
+
+.nav-label-hidden {
+    opacity: 0;
+    width: 0;
+    overflow: hidden;
+    position: absolute;
+    pointer-events: none;
+}
+
+/* Collapsed: center icon */
+.sidebar-collapsed .nav-item {
+    justify-content: center;
+    padding: 10px;
+}
+
+.sidebar-collapsed .sidebar-section {
+    padding: 0 var(--space-1);
+}
+
+/* --- Tooltip (collapsed only) --- */
+.nav-tooltip {
+    position: absolute;
+    left: calc(100% + 12px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: #1e293b;
+    color: #e2e8f0;
+    padding: 6px 12px;
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-xs);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 120ms ease, transform 120ms ease;
+    transform: translateY(-50%) translateX(-4px);
+    z-index: 9999;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    line-height: 1.4;
+}
+
+.nav-tooltip::before {
+    content: '';
+    position: absolute;
+    left: -5px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 5px solid transparent;
+    border-right-color: #1e293b;
+    border-left: none;
+}
+
+.nav-tooltip-label {
+    font-weight: 600;
+}
+
+.nav-tooltip-shortcut {
+    font-size: 10px;
+    color: rgba(148, 163, 184, 0.8);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.nav-item:hover .nav-tooltip,
+.nav-item:focus-visible .nav-tooltip {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+}
+
+/* --- Notification Badge --- */
+.sidebar-badge {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    background: var(--color-danger);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: var(--radius-full);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    pointer-events: none;
+    box-shadow: 0 1px 3px rgba(239, 68, 68, 0.4);
+    animation: badge-pop 0.3s ease;
+}
+
+.sidebar-collapsed .sidebar-badge {
+    top: 2px;
+    right: 2px;
+    min-width: 16px;
+    height: 16px;
+    font-size: 9px;
+    padding: 0 4px;
+}
+
+@keyframes badge-pop {
+    0% { transform: scale(0); }
+    60% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+}
+
+/* Inline badge (expanded sidebar — sits next to label) */
+.sidebar-badge-inline {
+    margin-left: auto;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    background: var(--color-danger);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: var(--radius-full);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    box-shadow: 0 1px 3px rgba(239, 68, 68, 0.4);
+    animation: badge-pop 0.3s ease;
+}
+
+/* --- Bottom section --- */
+.sidebar-bottom {
+    margin-top: auto;
+    padding: var(--space-2) 0 var(--space-3);
+    border-top: 1px solid var(--color-nav-border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+.sidebar-footer-actions {
+    padding: 0 var(--space-2);
+}
+
+/* Logout button */
+.sidebar-logout-btn {
+    color: var(--color-nav-text-muted) !important;
+}
+.sidebar-logout-btn:hover {
+    color: #fca5a5 !important;
+    background: rgba(239, 68, 68, 0.1) !important;
+}
+
+/* --- Toggle button --- */
+.sidebar-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: var(--space-2) var(--space-3) 0;
+    padding: 8px;
+    border: 1px solid var(--color-nav-border);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--color-nav-text-muted);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    min-height: 36px;
+}
+
+.sidebar-toggle-btn:hover {
+    background: var(--color-nav-bg-hover);
+    color: var(--color-nav-active-text);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.sidebar-toggle-btn:focus-visible {
+    outline: 2px solid var(--brand-accent);
+    outline-offset: -2px;
+}
+
+/* --- Mobile: off-canvas drawer --- */
+@media (max-width: 768px) {
+    .sidebar {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        width: var(--sidebar-expanded) !important;
+        transform: translateX(-100%);
+        transition: transform var(--transition-base);
+        z-index: 1100;
+        padding-top: var(--header-height);
+    }
+
+    .sidebar.sidebar-mobile-open {
+        transform: translateX(0);
+    }
+
+    .sidebar-collapsed {
+        transform: translateX(-100%);
+    }
+
+
+
+    /* Always show labels on mobile drawer */
+    .sidebar .nav-label-hidden {
+        opacity: 1;
+        width: auto;
+        position: static;
+        pointer-events: auto;
+    }
+
+    .sidebar .nav-item {
+        justify-content: flex-start;
+        padding: 10px 12px;
+    }
+
+    .sidebar .nav-tooltip {
+        display: none;
+    }
+}
+
+/* Overlay for mobile drawer */
+.sidebar-mobile-overlay {
+    display: none;
+}
+
+@media (max-width: 768px) {
+    .sidebar-mobile-overlay {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 1099;
+        animation: fadeIn 0.2s ease;
+        backdrop-filter: blur(2px);
+    }
+}

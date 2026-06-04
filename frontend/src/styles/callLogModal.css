@@ -1,0 +1,724 @@
+/* ============================================================
+   CALL LOG MODAL — PREMIUM POLISHED DESIGN
+   Professional Agent Workspace with Profile Header
+   ============================================================ */
+
+/* --- Keyframe Animations --- */
+@keyframes clmFadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes clmSlideUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px) scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes clmReveal {
+    from {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* --- Base Layout --- */
+.clm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(16px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    z-index: 2000;
+    animation: clmFadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.clm-container-wide {
+    position: relative;
+    background: #ffffff;
+    width: 100%;
+    max-width: 1150px; /* Increased from 1040px to prevent overflow */
+    width: 90vw;
+    height: auto;
+    max-height: 90vh;
+    border-radius: 1rem;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 25px 70px -10px rgba(0, 0, 0, 0.4);
+    animation: clmSlideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.clm-floating-close-corner {
+    position: absolute;
+    top: 1.5rem;
+    right: 1.5rem;
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    border: 1px solid #cbd5e1;
+    background: white;
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    z-index: 1000;
+}
+
+.clm-floating-close-corner:hover {
+    background: #fef2f2;
+    color: #ef4444;
+    transform: rotate(90deg);
+}
+
+/* --- Dashboard Grid --- */
+.clm-dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    flex: 1;
+    overflow: hidden;
+    min-height: 700px;
+}
+
+/* --- LEFT SIDEBAR (Zones 1-4) --- */
+.clm-left-sidebar {
+    grid-column: 1 / 4; /* Slightly wider for better readability */
+    grid-row: 1 / 3;
+    background: #f8fafc;
+    padding: 2.5rem 2rem;
+    border-right: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+/* Zone 1: Identity */
+.clm-zone-identity {
+    margin-bottom: 0.75rem; /* Reduced from 1.5rem */
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem; /* Reduced from 0.75rem */
+}
+
+.clm-id-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem; /* Reduced from 1rem */
+}
+
+.clm-id-icon-circle {
+    width: 28px; /* Slightly smaller for density */
+    height: 28px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #64748b;
+    flex-shrink: 0;
+}
+
+.clm-id-icon-circle.phone {
+    background: #ecfdf5;
+    border-color: #d1fae5;
+    color: #10b981;
+}
+
+.clm-id-icon-circle.asset {
+    background: #eff6ff;
+    border-color: #dbeafe;
+    color: #3b82f6;
+}
+
+.clm-id-name {
+    font-size: 22px; /* Slightly smaller for density */
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: -0.02em;
+    margin: 0;
+}
+
+.clm-id-phone {
+    font-size: 16px; /* Slightly smaller for density */
+    font-weight: 700;
+    color: #475569;
+}
+
+/* Zone 2: The Asset */
+.clm-zone-asset {
+    margin-bottom: 0.75rem; /* Reduced from 1.25rem */
+}
+
+.clm-asset-vehicle {
+    font-size: 14px; /* Slightly smaller */
+    font-weight: 700;
+    color: #334155;
+}
+
+.clm-hard-divider {
+    height: 1px;
+    background: #e5e7eb;
+    margin: 0.75rem 0; /* Reduced from 1.25rem */
+}
+
+/* Zone 3: EMI Status Table (Moved up) */
+.clm-zone-status-table {
+    margin-bottom: 1rem; /* Reduced from 1.25rem */
+}
+
+.clm-status-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    overflow: hidden;
+}
+
+/* Zone 4: The Hero Metric */
+.clm-zone-hero {
+    margin-bottom: 1.5rem;
+}
+
+.clm-hero-box {
+    background: #fef2f2;
+    padding: 1.25rem 1.5rem;
+    border-radius: 1.25rem;
+    border: 1px solid #fee2e2;
+}
+
+.clm-hero-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #f87171;
+    margin-bottom: 0.5rem;
+}
+
+.clm-hero-number {
+    font-size: 32px;
+    font-weight: 900;
+    color: #dc2626;
+    letter-spacing: -0.04em;
+}
+
+/* Zone 4: Financial Breakdown (Receipt Style) */
+.clm-zone-breakdown {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.clm-breakdown-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px dashed #d1d5db; /* Receipt style divider */
+}
+
+.clm-breakdown-row:last-child {
+    border-bottom: none;
+}
+
+.clm-breakdown-row .label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #64748b;
+}
+
+.clm-breakdown-row .value {
+    font-size: 14px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+/* Zone 5: EMI Status Table */
+.clm-zone-status-table {
+    margin-top: 1.5rem;
+}
+
+.clm-status-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    overflow: hidden;
+}
+
+.clm-status-col {
+    padding: 0.75rem 0.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    border-right: 1px solid #e2e8f0;
+}
+
+.clm-status-col:last-child {
+    border-right: none;
+}
+
+.clm-status-col .label {
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #94a3b8;
+}
+
+.clm-status-col .value {
+    font-size: 16px;
+    font-weight: 800;
+    color: #1e293b;
+}
+
+/* --- Column 2: History --- */
+.clm-col-history-merged {
+    grid-column: 4 / 8; /* Reduced slightly to give form more room */
+    grid-row: 1 / 3;
+    background: #ffffff;
+    padding: 2.5rem 2rem;
+    border-right: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.clm-history-scroller {
+    flex: 1;
+    overflow-y: auto;
+}
+
+/* --- Column 3: Action Form --- */
+.clm-col-form {
+    grid-column: 8 / 13; /* Expanded back to ensure form elements fit comfortably */
+    grid-row: 1 / 3;
+    background: #ffffff;
+    padding: 2.5rem 1.5rem; /* Reduced horizontal padding to give content more room */
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    border-left: 1px solid #f1f5f9;
+}
+
+/* --- Form Components --- */
+.clm-form-section {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 15px;
+    /* Added padding bottom as per request */
+}
+
+.clm-label-xs {
+    display: block;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #94a3b8;
+    margin-bottom: 1.25rem;
+}
+
+/* Outcome Grid & Cards */
+.clm-outcome-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem; /* Reduced from 0.75rem to ensure 4 buttons fit */
+}
+
+.clm-outcome-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    /* Center content vertically */
+    text-align: center;
+    aspect-ratio: 1 / 1;
+    /* Force square shape */
+    padding: 0.5rem;
+    border-radius: 1rem;
+    /* Standardized radius */
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    /* Hover-level border by default */
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    gap: 0.25rem;
+    /* Tighter gap for square layout */
+}
+
+.clm-outcome-card:hover {
+    border-color: #cbd5e1;
+    transform: translateY(-2px);
+}
+
+.outcome-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 1rem;
+    /* Slightly smaller but consistent radius */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f8fafc;
+    color: #94a3b8;
+    border: 1px solid #cbd5e1;
+}
+
+.outcome-icon svg {
+    width: 18px;
+    height: 18px;
+}
+
+.outcome-title {
+    font-size: 0.7rem; /* Slightly smaller to prevent text wrap on No Answer */
+    font-weight: 800;
+    color: #1e293b;
+    letter-spacing: 0.01em;
+}
+
+/* Outcome Card Active States */
+.clm-outcome-card.active.promise {
+    background: #f0fdf4;
+    border-color: #4ade80;
+}
+
+.clm-outcome-card.active.promise .outcome-icon {
+    background: #22c55e;
+    color: white;
+    border-color: #22c55e;
+}
+
+.clm-outcome-card.active.callback {
+    background: #eff6ff;
+    border-color: #60a5fa;
+}
+
+.clm-outcome-card.active.callback .outcome-icon {
+    background: #2563eb;
+    color: white;
+    border-color: #2563eb;
+}
+
+.clm-outcome-card.active.refused {
+    background: #fef2f2;
+    border-color: #f87171;
+}
+
+.clm-outcome-card.active.refused .outcome-icon {
+    background: #ef4444;
+    color: white;
+    border-color: #ef4444;
+}
+
+.clm-outcome-card.active.noanswer {
+    background: #fffbeb;
+    border-color: #fbbf24;
+}
+
+.clm-outcome-card.active.noanswer .outcome-icon {
+    background: #f59e0b;
+    color: white;
+    border-color: #f59e0b;
+}
+
+/* Inset Container Styling (Follow-up & Notes) */
+.clm-scheduling-card,
+.clm-notes-card {
+    background: #f9fafb;
+    /* Light tint for the card container */
+    padding: 1.75rem;
+    border-radius: 1rem;
+    border: 1px solid #cbd5e1;
+    display: flex;
+    flex-direction: column;
+}
+
+.clm-sched-row-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.125rem;
+    /* Reduced gap as per request */
+}
+
+.clm-label-inline {
+    display: inline-flex !important;
+    align-items: center;
+    margin-bottom: 0 !important;
+    line-height: 1;
+    /* Reset line height for alignment */
+}
+
+.clm-scheduled-date {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: #eff6ff;
+    color: #2563eb;
+    padding: 6px 14px;
+    border-radius: 99px;
+    border: 1px solid #dbeafe;
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.clm-sched-row-controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    justify-content: space-between;
+}
+
+.clm-days-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.clm-days-input {
+    width: 68px;
+    height: 48px;
+    border: 1px solid #cbd5e1;
+    border-radius: 1rem;
+    /* Standardized radius */
+    text-align: center;
+    font-weight: 800;
+    font-size: 1.1rem;
+    background: #ffffff;
+    /* White input on tinted card */
+    outline: none;
+}
+
+.clm-quick-pill {
+    padding: 10px 18px;
+    background: white;
+    border: 1px solid #cbd5e1;
+    border-radius: 1rem;
+    /* Standardized radius */
+    font-size: 11px;
+    font-weight: 800;
+    color: #475569;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.clm-quick-pill.active {
+    background: #0f172a;
+    color: white;
+    border-color: #0f172a;
+}
+
+/* Interaction Notes Specifics */
+.clm-rich-textarea-fixed {
+    width: 100%;
+    min-height: 80px;
+    /* Reduced to fit save button */
+    padding: 1.25rem 1.5rem;
+    border-radius: 1rem;
+    /* Standardized radius */
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    /* White textarea on tinted card */
+    outline: none;
+    font-size: 14px;
+    color: #334155;
+    resize: none;
+}
+
+/* Save Button Styling */
+.btn-save-interaction {
+    background: #d1d5db;
+    /* Light grey base as per screenshot */
+    color: #ffffff;
+    border: none;
+    height: 68px;
+    border-radius: 1rem;
+    font-weight: 800;
+    font-size: 1.4rem;
+    width: 100%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.btn-save-interaction:hover:not(:disabled) {
+    background: #1e293b;
+}
+
+.clm-info-tile {
+    padding: 1rem;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 1rem;
+    /* Standardized radius */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+}
+
+.clm-tile-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #94a3b8;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+.clm-tile-value {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #1e293b;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.highlight-red {
+    background: #fef2f2;
+    border-color: #fee2e2;
+}
+
+.highlight-red .clm-tile-label {
+    color: #f87171;
+}
+
+.highlight-red .clm-tile-value {
+    color: #dc2626;
+}
+
+.highlight-blue {
+    background: #f0f9ff;
+    border-color: #e0f2fe;
+}
+
+.highlight-blue .stat-label {
+    color: #38bdf8;
+}
+
+.highlight-blue .stat-value {
+    color: #0284c7;
+}
+
+.highlight-amber {
+    background: #fffbeb;
+    border-color: #fef3c7;
+}
+
+.highlight-amber .clm-tile-label {
+    color: #fbbf24;
+}
+
+.highlight-amber .clm-tile-value {
+    color: #d97706;
+}
+
+/* --- Timeline --- */
+.clm-vertical-timeline {
+    position: relative;
+    padding-left: 1rem;
+}
+
+.clm-timeline-node {
+    position: relative;
+    padding-bottom: 2.5rem; /* Increased from 1.5rem */
+}
+
+.clm-node-line {
+    position: absolute;
+    left: -0.6rem;
+    top: 0.5rem;
+    bottom: 0;
+    width: 2px;
+    background: #f1f5f9;
+}
+
+.clm-node-dot {
+    position: absolute;
+    left: -1rem;
+    top: 0.5rem;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: white;
+    border: 3px solid #10b981;
+    z-index: 2;
+}
+
+.clm-log-item {
+    background: white;
+    border: 1px solid #f1f5f9;
+    border-radius: 16px;
+    padding: 1.5rem; /* Increased from 1rem */
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    transition: all 0.3s ease;
+}
+
+.clm-log-item:hover {
+    transform: translateX(4px);
+    border-color: #e2e8f0;
+}
+
+.clm-status-pill {
+    padding: 4px 10px;
+    font-size: 10px;
+    font-weight: 800;
+    border-radius: 6px;
+    text-transform: uppercase;
+}
+
+.pill--promise {
+    background: #ecfdf5;
+    color: #059669;
+}
+
+.pill--call_back {
+    background: #eff6ff;
+    color: #2563eb;
+}
+
+.pill--refused {
+    background: #fef2f2;
+    color: #dc2626;
+}
+
+.pill--no_answer {
+    background: #fffbeb;
+    color: #d97706;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #e2e8f0;
+    border-radius: 10px;
+}

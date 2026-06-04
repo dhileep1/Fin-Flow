@@ -1,0 +1,302 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  phone     String?
+  address   String?
+  settings  Json     @default("{}")
+  status    String   @default("active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  users         User[]
+  customers     Customer[]
+  vehicles      Vehicle[]
+  loans         Loan[]
+  loanDues      LoanDue[]
+  penalties     Penalty[]
+  payments      Payment[]
+  receipts      Receipt[]
+  notifications Notification[]
+  callTasks     CallTask[]
+  auditLogs     AuditLog[]
+  guarantors    Guarantor[]
+
+  @@map("organizations")
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  orgId        String   @map("org_id") @db.Uuid
+  name         String
+  phone        String?
+  email        String?
+  passwordHash String?  @map("password_hash")
+  role         String   // admin, staff, accountant, viewer
+  status       String   @default("active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  org            Organization  @relation(fields: [orgId], references: [id])
+  assignedLoans  Loan[]        @relation("AssignedStaff")
+  assignedTasks  CallTask[]    @relation("AssignedTaskStaff")
+  callLogs       CallLog[]
+  payments       Payment[]     @relation("PaymentCreator")
+
+  @@index([orgId, phone])
+  @@map("users")
+}
+
+model Customer {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @map("org_id") @db.Uuid
+  name        String
+  phone       String
+  altPhone    String[] @map("alt_phone")
+  address     String?
+  aadharNumber String? @map("aadhar_number")
+  photoUrl    String?  @map("photo_url")
+  optOutWhatsapp Boolean @default(false) @map("opt_out_whatsapp")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  org           Organization   @relation(fields: [orgId], references: [id])
+  vehicles      Vehicle[]
+  loans         Loan[]
+  notifications Notification[]
+
+  @@index([orgId, phone])
+  @@map("customers")
+}
+
+model Vehicle {
+  id              String   @id @default(uuid()) @db.Uuid
+  orgId           String   @map("org_id") @db.Uuid
+  customerId      String   @map("customer_id") @db.Uuid
+  vehicleNumber   String   @map("vehicle_number")
+  model           String?
+  engineNumber    String?  @map("engine_number")
+  chassisNumber   String?  @map("chassis_number")
+  rcImageUrl      String?  @map("rc_image_url")
+  insuranceValidTill DateTime? @map("insurance_valid_till")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  org      Organization @relation(fields: [orgId], references: [id])
+  customer Customer     @relation(fields: [customerId], references: [id])
+  loans    Loan[]
+
+  @@index([orgId, vehicleNumber])
+  @@map("vehicles")
+}
+
+model Guarantor {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @map("org_id") @db.Uuid
+  loanId      String   @map("loan_id") @db.Uuid
+  name        String
+  phone       String?
+  aadharNumber String? @map("aadhar_number")
+  address     String?
+  photoUrl    String?  @map("photo_url")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  org  Organization @relation(fields: [orgId], references: [id])
+  loan Loan         @relation(fields: [loanId], references: [id])
+
+  @@index([loanId])
+  @@index([orgId])
+  @@map("guarantors")
+}
+
+model Loan {
+  id                    String   @id @default(uuid()) @db.Uuid
+  orgId                 String   @map("org_id") @db.Uuid
+  customerId            String   @map("customer_id") @db.Uuid
+  vehicleId             String   @map("vehicle_id") @db.Uuid
+  assignedStaffId       String?  @map("assigned_staff_id") @db.Uuid
+  principalAmount       Decimal  @map("principal_amount") @db.Decimal(18, 2)
+  tenureMonths          Int      @map("tenure_months")
+  monthlyInterestRate   Decimal  @map("monthly_interest_rate") @db.Decimal(8, 6)
+  monthlyInterestAmount Decimal  @map("monthly_interest_amount") @db.Decimal(18, 2)
+  monthlyPrincipalAmount Decimal @map("monthly_principal_amount") @db.Decimal(18, 2)
+  monthlyDueAmount      Decimal  @map("monthly_due_amount") @db.Decimal(18, 2)
+  startDate             DateTime @map("start_date") @db.Date
+  nextDueDate           DateTime? @map("next_due_date") @db.Date
+  outstandingPrincipal  Decimal  @map("outstanding_principal") @db.Decimal(18, 2)
+  accruedPenalty        Decimal  @default(0) @map("accrued_penalty") @db.Decimal(18, 2)
+  documentFee           Decimal  @map("document_fee") @db.Decimal(18, 2)
+  disbursedAmount       Decimal  @map("disbursed_amount") @db.Decimal(18, 2)
+  status                String   @default("active")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at")
+
+  org           Organization   @relation(fields: [orgId], references: [id])
+  customer      Customer       @relation(fields: [customerId], references: [id])
+  vehicle       Vehicle        @relation(fields: [vehicleId], references: [id])
+  assignedStaff User?          @relation("AssignedStaff", fields: [assignedStaffId], references: [id])
+  loanDues      LoanDue[]
+  payments      Payment[]
+  notifications Notification[]
+  callTasks     CallTask[]
+  guarantors    Guarantor[]
+
+  @@index([orgId, nextDueDate])
+  @@index([orgId, assignedStaffId])
+  @@map("loans")
+}
+
+model LoanDue {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @map("org_id") @db.Uuid
+  loanId      String   @map("loan_id") @db.Uuid
+  dueSequence Int      @map("due_sequence")
+  dueDate     DateTime @map("due_date") @db.Date
+  principalDue Decimal @map("principal_due") @db.Decimal(18, 2)
+  interestDue  Decimal @map("interest_due") @db.Decimal(18, 2)
+  penaltyDue   Decimal @default(0) @map("penalty_due") @db.Decimal(18, 2)
+  amountPaid   Decimal @default(0) @map("amount_paid") @db.Decimal(18, 2)
+  totalDue     Decimal @map("total_due") @db.Decimal(18, 2)
+  status       String  @default("upcoming") // upcoming, pending, paid
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  org       Organization @relation(fields: [orgId], references: [id])
+  loan      Loan         @relation(fields: [loanId], references: [id])
+  penalties Penalty[]
+  payments  Payment[]
+
+  @@index([orgId, dueDate])
+  @@index([loanId])
+  @@map("loan_dues")
+}
+
+model Penalty {
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @map("org_id") @db.Uuid
+  loanDueId     String   @map("loan_due_id") @db.Uuid
+  penaltyDate   DateTime @map("penalty_date") @db.Date
+  penaltyAmount Decimal  @map("penalty_amount") @db.Decimal(18, 2)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  org     Organization @relation(fields: [orgId], references: [id])
+  loanDue LoanDue      @relation(fields: [loanDueId], references: [id])
+
+  @@unique([loanDueId, penaltyDate], map: "ux_penalties_loan_due_date")
+  @@map("penalties")
+}
+
+model Payment {
+  id              String   @id @default(uuid()) @db.Uuid
+  orgId           String   @map("org_id") @db.Uuid
+  loanId          String   @map("loan_id") @db.Uuid
+  loanDueId       String?  @map("loan_due_id") @db.Uuid
+  amount          Decimal  @db.Decimal(18, 2)
+  paymentMethod   String?  @map("payment_method") // cash, upi, bank, cheque, card
+  referenceNumber String?  @map("reference_number")
+  allocationDetails Json?  @map("allocation_details") // JSON breakdown of how payment was applied
+  paymentDate     DateTime @default(now()) @map("payment_date")
+  createdBy       String?  @map("created_by") @db.Uuid
+
+  org      Organization @relation(fields: [orgId], references: [id])
+  loan     Loan         @relation(fields: [loanId], references: [id])
+  loanDue  LoanDue?     @relation(fields: [loanDueId], references: [id])
+  creator  User?        @relation("PaymentCreator", fields: [createdBy], references: [id])
+  receipts Receipt[]
+
+  @@index([loanId])
+  @@index([paymentDate])
+  @@map("payments")
+}
+
+model Receipt {
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @map("org_id") @db.Uuid
+  paymentId     String   @map("payment_id") @db.Uuid
+  receiptNumber String   @map("receipt_number")
+  pdfUrl        String?  @map("pdf_url")
+  whatsappSent  Boolean  @default(false) @map("whatsapp_sent")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  org     Organization @relation(fields: [orgId], references: [id])
+  payment Payment      @relation(fields: [paymentId], references: [id])
+
+  @@map("receipts")
+}
+
+model Notification {
+  id               String   @id @default(uuid()) @db.Uuid
+  orgId            String   @map("org_id") @db.Uuid
+  customerId       String?  @map("customer_id") @db.Uuid
+  loanId           String?  @map("loan_id") @db.Uuid
+  type             String?  // reminder, receipt, manual
+  templateId       String?  @map("template_id") @db.Uuid
+  messageBody      String?  @map("message_body")
+  status           String   @default("pending") // pending, sent, failed
+  providerMessageId String? @map("provider_message_id")
+  sentAt           DateTime? @map("sent_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  org      Organization @relation(fields: [orgId], references: [id])
+  customer Customer?    @relation(fields: [customerId], references: [id])
+  loan     Loan?        @relation(fields: [loanId], references: [id])
+
+  @@index([orgId, status])
+  @@map("notifications")
+}
+
+model CallTask {
+  id              String   @id @default(uuid()) @db.Uuid
+  orgId           String   @map("org_id") @db.Uuid
+  loanId          String   @map("loan_id") @db.Uuid
+  assignedStaffId String?  @map("assigned_staff_id") @db.Uuid
+  lastCallDate    DateTime? @map("last_call_date") @db.Date
+  nextCallDate    DateTime? @map("next_call_date") @db.Date
+  notes           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
+
+  org           Organization @relation(fields: [orgId], references: [id])
+  loan          Loan         @relation(fields: [loanId], references: [id])
+  assignedStaff User?        @relation("AssignedTaskStaff", fields: [assignedStaffId], references: [id])
+  callLogs      CallLog[]
+
+  @@index([orgId, nextCallDate])
+  @@map("call_tasks")
+}
+
+model CallLog {
+  id                   String   @id @default(uuid()) @db.Uuid
+  callTaskId           String   @map("call_task_id") @db.Uuid
+  userId               String?  @map("user_id") @db.Uuid
+  callDate             DateTime @default(now()) @map("call_date")
+  outcome              String?  // connected, no_answer, promise, rejected
+  notes                String?
+  promisedPaymentAmount Decimal? @map("promised_payment_amount") @db.Decimal(18, 2)
+  promisedPaymentDate  DateTime? @map("promised_payment_date") @db.Date
+  nextFollowupDate     DateTime? @map("next_followup_date") @db.Date
+
+  callTask CallTask @relation(fields: [callTaskId], references: [id])
+  user     User?    @relation(fields: [userId], references: [id])
+
+  @@index([callTaskId])
+  @@map("call_logs")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  orgId      String?  @map("org_id") @db.Uuid
+  userId     String?  @map("user_id") @db.Uuid
+  action     String?
+  entityType String?  @map("entity_type")
+  entityId   String?  @map("entity_id") @db.Uuid
+  details    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  org Organization? @relation(fields: [orgId], references: [id])
+
+  @@map("audit_logs")
+}
