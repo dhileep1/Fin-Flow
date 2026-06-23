@@ -34,7 +34,7 @@ function AppRoutes() {
                 }
             >
                 <Route index element={<Dashboard />} />
-                <Route path="collections" element={<Collections />} />
+                <Route path="transactions" element={<Collections />} />
                 <Route path="customers/:id/loans" element={<CustomerLoans />} />
                 <Route path="calls" element={<CallPanel />} />
                 <Route path="loans" element={<Loans />} />

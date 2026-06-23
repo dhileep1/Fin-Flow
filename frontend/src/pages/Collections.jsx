@@ -349,8 +349,8 @@ export default function Collections() {
             <div className="animate-fade-in">
                 <div className="page-header">
                     <div>
-                        <h1 className="page-title">Collections</h1>
-                        <p className="page-subtitle">Loading collections data…</p>
+                        <h1 className="page-title">Transactions</h1>
+                        <p className="page-subtitle">Loading transactions data…</p>
                     </div>
                 </div>
                 <div className="card">
@@ -367,7 +367,7 @@ export default function Collections() {
             {/* Header */}
             <div className="page-header" style={{ marginBottom: 'var(--space-6)' }}>
                 <div>
-                    <h1 className="page-title">Collections</h1>
+                    <h1 className="page-title">Transactions</h1>
                 </div>
                 <div className="cmd-header-meta">
                     <span className="cmd-date-badge text-slate-500">
