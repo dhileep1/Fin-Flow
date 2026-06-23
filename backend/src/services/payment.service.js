@@ -8,7 +8,7 @@ const { v4: uuidv4 } = require('uuid');
  * Applies payment in order: penalty → interest → principal (configurable per-tenant).
  * Iterates dues oldest first.
  */
-async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNumber, createdBy }) {
+async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNumber, createdBy, paymentDate }) {
     let remaining = Number(amount);
     const allocationDetails = [];
 
@@ -124,6 +124,7 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
                 referenceNumber,
                 allocationDetails: allocationDetails,
                 createdBy,
+                ...(paymentDate && { paymentDate: new Date(paymentDate) }),
             },
         });
 
@@ -165,4 +166,23 @@ async function getPaymentsByLoan(orgId, loanId) {
     });
 }
 
-module.exports = { recordPayment, getPaymentsByLoan };
+/**
+ * Get all payments for an organization.
+ */
+async function getAllPayments(orgId) {
+    return prisma.payment.findMany({
+        where: { orgId },
+        include: {
+            loan: {
+                include: {
+                    customer: { select: { name: true } },
+                },
+            },
+            creator: { select: { name: true } },
+            receipts: { select: { receiptNumber: true } },
+        },
+        orderBy: { paymentDate: 'desc' },
+    });
+}
+
+module.exports = { recordPayment, getPaymentsByLoan, getAllPayments };

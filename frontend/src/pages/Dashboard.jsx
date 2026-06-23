@@ -520,11 +520,11 @@ export default function Dashboard() {
                             <tbody className="divide-y divide-slate-100">
                                 {currentRows.map((row) => (
                                     <tr key={row.id} className="cursor-pointer hover-table-row">
-                                        <td className="px-6 py-4 text-left">
-                                            <span className="text-slate-900 font-semibold">{row.customer}</span>
-                                        </td>
                                         {activeTab === 'collections' ? (
                                             <>
+                                                <td className="px-6 py-4 text-left">
+                                                    <span className="text-slate-900 font-semibold">{row.customer}</span>
+                                                </td>
                                                 <td className="px-6 py-4 text-center">
                                                     <span className="text-slate-900 font-bold">{fmtShort(row.amount)}</span>
                                                 </td>
@@ -537,6 +537,9 @@ export default function Dashboard() {
                                             </>
                                         ) : (
                                             <>
+                                                <td className="px-6 py-4 text-left">
+                                                    <span className="text-slate-900 font-semibold">{row.customer}</span>
+                                                </td>
                                                 <td className="px-6 py-4 text-center">
                                                     <span className="text-slate-900 font-bold">{fmtShort(row.principal)}</span>
                                                 </td>

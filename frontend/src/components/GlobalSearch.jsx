@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search as SearchIcon, X, User, Car, Phone, ArrowRight, Loader2 } from 'lucide-react';
+import { Search as SearchIcon, X, User, Car, Phone, ArrowRight, Loader2, IndianRupee } from 'lucide-react';
 import api from '../api/client';
 
 export default function GlobalSearch() {
@@ -78,16 +78,11 @@ export default function GlobalSearch() {
 
     const handleSubmit = () => {
         if (!query.trim()) return;
-        if (filterType === 'vehicle') {
-            handleNavigate('/loans');
-        } else {
-            handleNavigate('/customers');
-        }
+        handleNavigate('/loans');
     };
 
     const hasResults = results && (
-        (results.customers && results.customers.length > 0) ||
-        (results.loans && results.loans.length > 0)
+        results.loans && results.loans.length > 0
     );
 
     const filterButtons = [
@@ -130,7 +125,7 @@ export default function GlobalSearch() {
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter') handleSubmit();
                             }}
-                            placeholder="Search everywhere..."
+                            placeholder="Search loans..."
                             autoFocus
                         />
                         {loading && <Loader2 size={16} className="gs-spinner" />}
@@ -143,55 +138,57 @@ export default function GlobalSearch() {
                         </button>
                     </div>
 
-
-
                     {/* Results dropdown */}
                     {query.trim().length >= 2 && (
                         <div className="gs-results">
                             {hasResults ? (
                                 <>
-                                    {results.customers && results.customers.length > 0 && (
-                                        <div className="gs-group">
-                                            <div className="gs-group-label">Customers</div>
-                                            {results.customers.slice(0, 4).map((c) => (
-                                                <button
-                                                    key={c.id}
-                                                    className="gs-result-row"
-                                                    onClick={() => handleNavigate(`/customers?highlight=${c.id}`)}
-                                                >
-                                                    <div className="gs-result-avatar">
-                                                        {c.name?.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
-                                                    </div>
-                                                    <div className="gs-result-info">
-                                                        <span className="gs-result-name">{c.name}</span>
-                                                        <span className="gs-result-sub">{c.phone}</span>
-                                                    </div>
-                                                    <ArrowRight size={14} className="gs-result-arrow" />
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
                                     {results.loans && results.loans.length > 0 && (
                                         <div className="gs-group">
                                             <div className="gs-group-label">Loans</div>
-                                            {results.loans.slice(0, 4).map((l) => (
+                                            {results.loans.slice(0, 5).map((l) => (
                                                 <button
                                                     key={l.id}
                                                     className="gs-result-row"
                                                     onClick={() => handleNavigate(`/loans/${l.id}`)}
+                                                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
                                                 >
-                                                    <div className="gs-result-avatar gs-result-avatar--loan">
-                                                        <Car size={14} />
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flex: 1, minWidth: 0 }}>
+                                                        <div className="gs-result-avatar gs-result-avatar--loan">
+                                                            <Car size={14} />
+                                                        </div>
+                                                        <div className="gs-result-info">
+                                                            <span className="gs-result-name">
+                                                                {l.customer?.name || 'Unknown'}
+                                                            </span>
+                                                            <span className="gs-result-sub">
+                                                                {l.vehicle?.vehicleNumber || '—'} · ₹{Number(l.outstandingPrincipal || 0).toLocaleString('en-IN')}
+                                                            </span>
+                                                        </div>
                                                     </div>
-                                                    <div className="gs-result-info">
-                                                        <span className="gs-result-name">
-                                                            {l.customer?.name || 'Unknown'}
-                                                        </span>
-                                                        <span className="gs-result-sub">
-                                                            {l.vehicle?.vehicleNumber || '—'} · ₹{Number(l.outstandingPrincipal || 0).toLocaleString('en-IN')}
-                                                        </span>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                        {l.needsPayment && (
+                                                            <span 
+                                                                title="Payment Due" 
+                                                                style={{ 
+                                                                    display: 'inline-flex', 
+                                                                    alignItems: 'center', 
+                                                                    gap: '2px', 
+                                                                    fontSize: '10px', 
+                                                                    fontWeight: 700, 
+                                                                    background: 'rgba(239, 68, 68, 0.1)', 
+                                                                    color: '#ef4444', 
+                                                                    padding: '2px 6px', 
+                                                                    borderRadius: '4px',
+                                                                    border: '1px solid rgba(239, 68, 68, 0.2)'
+                                                                }}
+                                                            >
+                                                                <IndianRupee size={10} />
+                                                                DUE
+                                                            </span>
+                                                        )}
+                                                        <ArrowRight size={14} className="gs-result-arrow" />
                                                     </div>
-                                                    <ArrowRight size={14} className="gs-result-arrow" />
                                                 </button>
                                             ))}
                                         </div>

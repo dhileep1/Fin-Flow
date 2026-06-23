@@ -28,6 +28,7 @@ model Organization {
   callTasks     CallTask[]
   auditLogs     AuditLog[]
   guarantors    Guarantor[]
+  expenses      Expense[]
 
   @@map("organizations")
 }
@@ -48,6 +49,7 @@ model User {
   assignedTasks  CallTask[]    @relation("AssignedTaskStaff")
   callLogs       CallLog[]
   payments       Payment[]     @relation("PaymentCreator")
+  expenses       Expense[]     @relation("ExpenseCreator")
 
   @@index([orgId, phone])
   @@map("users")
@@ -69,6 +71,7 @@ model Customer {
   vehicles      Vehicle[]
   loans         Loan[]
   notifications Notification[]
+  guarantorInstances Guarantor[] @relation("CustomerGuarantor")
 
   @@index([orgId, phone])
   @@map("customers")
@@ -98,6 +101,7 @@ model Guarantor {
   id          String   @id @default(uuid()) @db.Uuid
   orgId       String   @map("org_id") @db.Uuid
   loanId      String   @map("loan_id") @db.Uuid
+  customerId  String?  @map("customer_id") @db.Uuid
   name        String
   phone       String?
   aadharNumber String? @map("aadhar_number")
@@ -105,11 +109,13 @@ model Guarantor {
   photoUrl    String?  @map("photo_url")
   createdAt   DateTime @default(now()) @map("created_at")
 
-  org  Organization @relation(fields: [orgId], references: [id])
-  loan Loan         @relation(fields: [loanId], references: [id])
+  org      Organization @relation(fields: [orgId], references: [id])
+  loan     Loan         @relation(fields: [loanId], references: [id])
+  customer Customer?    @relation("CustomerGuarantor", fields: [customerId], references: [id])
 
   @@index([loanId])
   @@index([orgId])
+  @@index([customerId])
   @@map("guarantors")
 }
 
@@ -299,4 +305,21 @@ model AuditLog {
   org Organization? @relation(fields: [orgId], references: [id])
 
   @@map("audit_logs")
+}
+
+model Expense {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @map("org_id") @db.Uuid
+  amount      Decimal  @db.Decimal(18, 2)
+  category    String   // rent, salary, utilities, office, other
+  description String?
+  tags        String[] // array of tags (e.g. rent, salary, custom)
+  expenseDate DateTime @default(now()) @map("expense_date")
+  createdBy   String?  @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  org     Organization @relation(fields: [orgId], references: [id])
+  creator User?        @relation("ExpenseCreator", fields: [createdBy], references: [id])
+
+  @@map("expenses")
 }

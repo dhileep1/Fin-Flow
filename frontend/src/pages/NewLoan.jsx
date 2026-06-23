@@ -126,6 +126,11 @@ export default function NewLoan() {
         address: '',
     });
 
+    const [guarantorQuery, setGuarantorQuery] = useState('');
+    const [guarantorResults, setGuarantorResults] = useState([]);
+    const [guarantorsLoading, setGuarantorsLoading] = useState(false);
+    const [selectedGuarantorCustomer, setSelectedGuarantorCustomer] = useState(null);
+
     const [rcImageFile, setRcImageFile] = useState(null);
     const [customerPhotoFile, setCustomerPhotoFile] = useState(null);
 
@@ -153,6 +158,55 @@ export default function NewLoan() {
         if (value.length >= 2 || value.length === 0) {
             loadCustomers(value);
         }
+    };
+
+    const loadGuarantorCustomers = async (q) => {
+        if (!q || q.length < 2) {
+            setGuarantorResults([]);
+            return;
+        }
+        setGuarantorsLoading(true);
+        try {
+            const data = await api.getCustomers(`q=${encodeURIComponent(q)}`);
+            setGuarantorResults(data.customers || []);
+        } catch (e) {
+            console.error('Failed to search guarantor customers', e);
+        } finally {
+            setGuarantorsLoading(false);
+        }
+    };
+
+    const handleGuarantorSearchChange = (value) => {
+        setGuarantorQuery(value);
+        if (value.length >= 2 || value.length === 0) {
+            loadGuarantorCustomers(value);
+        }
+    };
+
+    const handleSelectGuarantorCustomer = (customer) => {
+        setSelectedGuarantorCustomer(customer);
+        setGuarantorResults([]);
+        setGuarantorQuery(customer.name);
+        setGuarantor({
+            customerId: customer.id,
+            name: customer.name,
+            phone: customer.phone,
+            aadharNumber: customer.aadharNumber ? formatAadhaar(customer.aadharNumber) : '',
+            address: customer.address || '',
+        });
+    };
+
+    const handleClearGuarantorCustomer = () => {
+        setSelectedGuarantorCustomer(null);
+        setGuarantorResults([]);
+        setGuarantorQuery('');
+        setGuarantor({
+            customerId: undefined,
+            name: '',
+            phone: '',
+            aadharNumber: '',
+            address: '',
+        });
     };
 
     const handleSelectCustomer = async (customer) => {
@@ -225,6 +279,11 @@ export default function NewLoan() {
             setError('Please select customer and vehicle');
             return;
         }
+        if (!guarantor.name?.trim() || !guarantor.phone?.trim()) {
+            setError('Please fill in the guarantor details (Name and Phone are required)');
+            setCurrentStep(2);
+            return;
+        }
         setCreatingLoan(true);
         setError('');
         try {
@@ -235,10 +294,10 @@ export default function NewLoan() {
                 tenureMonths: Number(loan.tenureMonths),
                 monthlyInterestRate: Number(loan.monthlyInterestRate) / 100,
                 startDate: loan.startDate,
-                guarantors: guarantor.name ? [{
+                guarantors: [{
                     ...guarantor,
-                    aadharNumber: guarantor.aadharNumber.replace(/\s/g, ''),
-                }] : [],
+                    aadharNumber: guarantor.aadharNumber ? guarantor.aadharNumber.replace(/\s/g, '') : '',
+                }],
             };
             const created = await api.createLoan(payload);
             navigate(`/loans/${created.id}`);
@@ -257,7 +316,7 @@ export default function NewLoan() {
     const isStepCompleted = (idx) => {
         if (idx === 0) return !!selectedCustomer;
         if (idx === 1) return !!selectedVehicleId;
-        if (idx === 2) return true; // optional
+        if (idx === 2) return !!(guarantor.name?.trim() && guarantor.phone?.trim()); // compulsory
         if (idx === 3) return true; // optional
         if (idx === 4) return false;
         return false;
@@ -266,6 +325,7 @@ export default function NewLoan() {
     const canGoNext = () => {
         if (currentStep === 0) return !!selectedCustomer;
         if (currentStep === 1) return !!selectedVehicleId;
+        if (currentStep === 2) return !!(guarantor.name?.trim() && guarantor.phone?.trim());
         return true;
     };
 
@@ -335,39 +395,52 @@ export default function NewLoan() {
                         {customersLoading && <div className="text-muted text-sm">Loading customers…</div>}
 
                         {!showNewCustomer && customerResults.length > 0 && (
-                            <div className="table-container" style={{ marginTop: 'var(--space-3)' }}>
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th>Name</th>
-                                            <th>Phone</th>
-                                            <th>Loans</th>
-                                            <th>Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {customerResults.slice(0, 5).map((c) => (
-                                            <tr key={c.id}>
-                                                <td style={{ fontWeight: 500 }}>{c.name}</td>
-                                                <td className="font-mono">{c.phone}</td>
-                                                <td>
-                                                    <span className="badge badge-accent">
-                                                        {c._count?.loans != null ? c._count.loans : '—'}
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                    <button
-                                                        type="button"
-                                                        className="btn btn-sm btn-ghost"
-                                                        onClick={() => handleSelectCustomer(c)}
-                                                    >
-                                                        Select
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                            <div className="customer-search-results" style={{
+                                marginTop: 'var(--space-3)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: 'var(--space-2)',
+                                maxHeight: '300px',
+                                overflowY: 'auto',
+                                padding: '2px'
+                            }}>
+                                {customerResults.slice(0, 5).map((c) => (
+                                    <div
+                                        key={c.id}
+                                        onClick={() => handleSelectCustomer(c)}
+                                        className="customer-search-item"
+                                        style={{
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            padding: 'var(--space-3) var(--space-4)',
+                                            background: 'var(--color-bg-card)',
+                                            border: '1px solid var(--color-border)',
+                                            borderRadius: 'var(--radius-md)',
+                                            cursor: 'pointer',
+                                            transition: 'all var(--transition-fast)',
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.borderColor = 'var(--brand-accent)';
+                                            e.currentTarget.style.backgroundColor = 'var(--slate-50)';
+                                            e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.borderColor = 'var(--color-border)';
+                                            e.currentTarget.style.backgroundColor = 'var(--color-bg-card)';
+                                            e.currentTarget.style.boxShadow = 'none';
+                                        }}
+                                    >
+                                        <div className="flex justify-between items-center" style={{ marginBottom: 'var(--space-1)' }}>
+                                            <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: 'var(--font-size-base)' }}>{c.name}</span>
+                                            <span className="font-mono text-muted text-sm" style={{ color: 'var(--color-text-secondary)' }}>{c.phone}</span>
+                                        </div>
+                                        {c.address && (
+                                            <div className="text-muted text-xs" style={{ wordBreak: 'break-word', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>
+                                                {c.address}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
                             </div>
                         )}
 
@@ -577,24 +650,108 @@ export default function NewLoan() {
                 {/* Step 2: Guarantor */}
                 {currentStep === 2 && (
                     <div className="card" style={{ marginBottom: 'var(--space-4)' }}>
-                        <h3 style={{ fontWeight: 600, marginBottom: 'var(--space-4)' }}>Guarantor Information (Jamin)</h3>
+                        <div className="flex justify-between items-center mb-4">
+                            <div>
+                                <h3 style={{ fontWeight: 600 }}>Guarantor Information (Jamin)</h3>
+                                <p className="text-muted text-sm">Select an existing customer or fill in new details</p>
+                            </div>
+                            {selectedGuarantorCustomer && (
+                                <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={handleClearGuarantorCustomer}
+                                >
+                                    Clear Selection
+                                </button>
+                            )}
+                        </div>
+
+                        {!selectedGuarantorCustomer && (
+                            <div className="search-bar" style={{ maxWidth: 480, marginBottom: 'var(--space-4)' }}>
+                                <span className="search-icon"><Search size={14} /></span>
+                                <input
+                                    type="text"
+                                    placeholder="Search existing customer by name or phone..."
+                                    value={guarantorQuery}
+                                    onChange={(e) => handleGuarantorSearchChange(e.target.value)}
+                                />
+                            </div>
+                        )}
+
+                        {guarantorsLoading && <div className="text-muted text-sm mb-4">Loading customers…</div>}
+
+                        {!selectedGuarantorCustomer && guarantorResults.length > 0 && (
+                            <div className="customer-search-results" style={{
+                                marginBottom: 'var(--space-4)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: 'var(--space-2)',
+                                maxHeight: '200px',
+                                overflowY: 'auto',
+                                padding: '2px'
+                            }}>
+                                {guarantorResults.slice(0, 5).map((c) => (
+                                    <div
+                                        key={c.id}
+                                        onClick={() => handleSelectGuarantorCustomer(c)}
+                                        className="customer-search-item"
+                                        style={{
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            padding: 'var(--space-3) var(--space-4)',
+                                            background: 'var(--color-bg-card)',
+                                            border: '1px solid var(--color-border)',
+                                            borderRadius: 'var(--radius-md)',
+                                            cursor: 'pointer',
+                                            transition: 'all var(--transition-fast)',
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.borderColor = 'var(--brand-accent)';
+                                            e.currentTarget.style.backgroundColor = 'var(--slate-50)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.borderColor = 'var(--color-border)';
+                                            e.currentTarget.style.backgroundColor = 'var(--color-bg-card)';
+                                        }}
+                                    >
+                                        <div className="flex justify-between items-center">
+                                            <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>{c.name}</span>
+                                            <span className="font-mono text-muted text-sm">{c.phone}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {selectedGuarantorCustomer && (
+                            <div className="card-glass" style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-3)', border: '1px solid var(--brand-accent)', background: 'var(--brand-accent-bg)' }}>
+                                <div style={{ color: 'var(--brand-accent-hover)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <Check size={16} /> Linked to Customer: {selectedGuarantorCustomer.name} ({selectedGuarantorCustomer.phone})
+                                </div>
+                            </div>
+                        )}
+
                         <div className="form-row">
                             <div className="form-group">
-                                <label className="form-label">Guarantor Name</label>
+                                <label className="form-label">Guarantor Name *</label>
                                 <input
                                     className="form-input"
+                                    required
                                     value={guarantor.name}
                                     onChange={(e) => setGuarantor({ ...guarantor, name: e.target.value })}
                                     placeholder="Full name of guarantor"
+                                    disabled={!!selectedGuarantorCustomer}
                                 />
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Phone</label>
+                                <label className="form-label">Phone *</label>
                                 <input
                                     className="form-input"
+                                    required
                                     value={guarantor.phone}
                                     onChange={(e) => setGuarantor({ ...guarantor, phone: e.target.value })}
                                     placeholder="Phone number"
+                                    disabled={!!selectedGuarantorCustomer}
                                 />
                             </div>
                             <div className="form-group">
@@ -605,6 +762,7 @@ export default function NewLoan() {
                                     onChange={(e) => setGuarantor({ ...guarantor, aadharNumber: formatAadhaar(e.target.value) })}
                                     placeholder="XXXX XXXX XXXX"
                                     maxLength={14}
+                                    disabled={!!selectedGuarantorCustomer}
                                 />
                             </div>
                         </div>
@@ -616,6 +774,7 @@ export default function NewLoan() {
                                 value={guarantor.address}
                                 onChange={(e) => setGuarantor({ ...guarantor, address: e.target.value })}
                                 placeholder="Current address"
+                                disabled={!!selectedGuarantorCustomer}
                             />
                         </div>
                     </div>
@@ -708,16 +867,37 @@ export default function NewLoan() {
                             </div>
                         </div>
 
-                        {loan.principalAmount && loan.tenureMonths && (
-                            <div className="card-glass" style={{ marginTop: 'var(--space-4)', padding: 'var(--space-4)' }}>
-                                <div className="text-sm text-muted">Summary (rough)</div>
-                                <div className="text-sm">
-                                    Principal: <strong>{formatCurrency(loan.principalAmount)}</strong> · Tenure:{' '}
-                                    <strong>{loan.tenureMonths} months</strong> · Rate:{' '}
-                                    <strong>{loan.monthlyInterestRate}% / month</strong>
+                        {loan.principalAmount && loan.tenureMonths && (() => {
+                            const p = Number(loan.principalAmount || 0);
+                            const n = Number(loan.tenureMonths || 0);
+                            const r = Number(loan.monthlyInterestRate || 0) / 100;
+                            const monthlyPrincipal = Math.round(p / n);
+                            const monthlyInterest = Math.round(p * r);
+                            const emi = monthlyPrincipal + monthlyInterest;
+                            return (
+                                <div className="card-glass" style={{ marginTop: 'var(--space-4)', padding: 'var(--space-4)' }}>
+                                    <div className="text-sm text-muted" style={{ fontWeight: 600, marginBottom: 'var(--space-3)' }}>Loan Summary</div>
+                                    <div className="text-sm" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 'var(--space-3)' }}>
+                                        <div>
+                                            <div className="text-muted text-xs">Principal</div>
+                                            <div style={{ fontWeight: 600, fontSize: 'var(--font-size-base)', marginTop: 'var(--space-1)', color: 'var(--color-text-primary)' }}>{formatCurrency(loan.principalAmount)}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-muted text-xs">Tenure</div>
+                                            <div style={{ fontWeight: 600, fontSize: 'var(--font-size-base)', marginTop: 'var(--space-1)', color: 'var(--color-text-primary)' }}>{loan.tenureMonths} months</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-muted text-xs">Interest Rate</div>
+                                            <div style={{ fontWeight: 600, fontSize: 'var(--font-size-base)', marginTop: 'var(--space-1)', color: 'var(--color-text-primary)' }}>{loan.monthlyInterestRate}% / month</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-muted text-xs" style={{ color: 'var(--brand-accent)', fontWeight: 600 }}>Monthly EMI</div>
+                                            <div style={{ fontWeight: 700, fontSize: 'var(--font-size-lg)', color: 'var(--brand-accent)', marginTop: 'var(--space-1)' }}>{formatCurrency(emi)}</div>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                        )}
+                            );
+                        })()}
                     </div>
                 )}
 

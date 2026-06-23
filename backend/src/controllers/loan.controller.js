@@ -11,6 +11,10 @@ async function createLoan(req, res, next) {
             return res.status(400).json({ error: 'Missing required fields: customerId, vehicleId, principalAmount, tenureMonths, monthlyInterestRate, startDate' });
         }
 
+        if (!guarantors || !Array.isArray(guarantors) || guarantors.length === 0 || !guarantors[0].name?.trim() || !guarantors[0].phone?.trim()) {
+            return res.status(400).json({ error: 'Guarantor (Jamin) name and phone number are compulsory.' });
+        }
+
         const loan = await loanService.createLoan({
             orgId: req.orgId,
             customerId,
@@ -26,11 +30,38 @@ async function createLoan(req, res, next) {
         // Add guarantors if provided
         if (guarantors && Array.isArray(guarantors) && guarantors.length > 0) {
             for (const g of guarantors) {
+                let customerId = g.customerId;
+
+                // If customerId is not provided, check by phone or create new customer
+                if (!customerId && g.phone) {
+                    const existingCustomer = await prisma.customer.findFirst({
+                        where: {
+                            orgId: req.orgId,
+                            phone: g.phone
+                        }
+                    });
+                    if (existingCustomer) {
+                        customerId = existingCustomer.id;
+                    } else if (g.name) {
+                        const newCustomer = await prisma.customer.create({
+                            data: {
+                                orgId: req.orgId,
+                                name: g.name,
+                                phone: g.phone,
+                                aadharNumber: g.aadharNumber ? g.aadharNumber.replace(/\s/g, '') : null,
+                                address: g.address,
+                            }
+                        });
+                        customerId = newCustomer.id;
+                    }
+                }
+
                 await prisma.guarantor.create({
                     data: {
                         id: uuidv4(),
                         orgId: req.orgId,
                         loanId: loan.id,
+                        customerId: customerId || null,
                         name: g.name,
                         phone: g.phone,
                         aadharNumber: g.aadharNumber,
@@ -61,13 +92,15 @@ async function getLoan(req, res, next) {
 
 async function listLoans(req, res, next) {
     try {
-        const { status, customerId, assignedStaffId, page, limit } = req.query;
+        const { status, customerId, assignedStaffId, page, limit, q, type } = req.query;
         const result = await loanService.listLoans(req.orgId, {
             status,
             customerId,
             assignedStaffId,
             page: Number(page) || 1,
             limit: Number(limit) || 25,
+            q,
+            type,
         });
         res.json(result);
     } catch (err) {

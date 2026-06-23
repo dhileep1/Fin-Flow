@@ -29,9 +29,12 @@ router.get('/targets', async (req, res, next) => {
             where,
             include: {
                 loans: {
-                    select: { status: true, nextDueDate: true },
-                    take: 1,
-                    orderBy: { createdAt: 'desc' }
+                    include: {
+                        loanDues: {
+                            where: { status: { not: 'paid' } },
+                            orderBy: { dueDate: 'asc' }
+                        }
+                    }
                 }
             }
         });

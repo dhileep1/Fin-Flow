@@ -13,6 +13,7 @@ import Customers from './pages/Customers';
 import Reports from './pages/Reports';
 import AdminConfig from './pages/AdminConfig';
 import CustomerLoans from './pages/CustomerLoans';
+import Collections from './pages/Collections';
 
 function ProtectedRoute({ children }) {
     const { isAuthenticated } = useAuth();
@@ -33,6 +34,7 @@ function AppRoutes() {
                 }
             >
                 <Route index element={<Dashboard />} />
+                <Route path="collections" element={<Collections />} />
                 <Route path="customers/:id/loans" element={<CustomerLoans />} />
                 <Route path="calls" element={<CallPanel />} />
                 <Route path="loans" element={<Loans />} />

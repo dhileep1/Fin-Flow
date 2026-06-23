@@ -25,6 +25,7 @@ app.use(`${API_PREFIX}/customers`, require('./routes/customer.routes'));
 app.use(`${API_PREFIX}/vehicles`, require('./routes/vehicle.routes'));
 app.use(`${API_PREFIX}/loans`, require('./routes/loan.routes'));
 app.use(`${API_PREFIX}/payments`, require('./routes/payment.routes'));
+app.use(`${API_PREFIX}/expenses`, require('./routes/expense.routes'));
 app.use(`${API_PREFIX}/call-tasks`, require('./routes/callTask.routes'));
 app.use(`${API_PREFIX}/notifications`, require('./routes/notification.routes'));
 app.use(`${API_PREFIX}/reports`, require('./routes/report.routes'));

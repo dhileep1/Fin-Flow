@@ -51,7 +51,7 @@ async function search(orgId, query, { limit = 25, type } = {}) {
     }
 
     // Search loans
-    loans = await prisma.loan.findMany({
+    const rawLoans = await prisma.loan.findMany({
         where: {
             orgId,
             OR: [
@@ -64,9 +64,27 @@ async function search(orgId, query, { limit = 25, type } = {}) {
         include: {
             customer: { select: { id: true, name: true, phone: true } },
             vehicle: { select: { id: true, vehicleNumber: true, model: true } },
+            loanDues: {
+                select: {
+                    dueDate: true,
+                    status: true,
+                }
+            }
         },
         take: limit,
         orderBy: { createdAt: 'desc' },
+    });
+
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+
+    loans = rawLoans.map(loan => {
+        const needsPayment = loan.loanDues.some(due => due.status !== 'paid' && new Date(due.dueDate) <= today);
+        const { loanDues, ...rest } = loan;
+        return {
+            ...rest,
+            needsPayment
+        };
     });
 
     return { customers, vehicles, loans };

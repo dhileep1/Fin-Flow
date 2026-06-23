@@ -32,6 +32,19 @@ async function listCustomers(req, res, next) {
                         }
                     },
                     _count: { select: { loans: true } },
+                    guarantorInstances: {
+                        include: {
+                            loan: {
+                                include: {
+                                    customer: {
+                                        select: {
+                                            name: true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 },
                 orderBy: { createdAt: 'desc' },
                 skip: (Number(page) - 1) * Number(limit),
@@ -100,6 +113,12 @@ async function createCustomer(req, res, next) {
 async function updateCustomer(req, res, next) {
     try {
         const { name, phone, altPhone, address, aadharNumber, photoUrl, optOutWhatsapp } = req.body;
+
+        const oldCustomer = await prisma.customer.findFirst({
+            where: { id: req.params.id, orgId: req.orgId }
+        });
+        if (!oldCustomer) return res.status(404).json({ error: 'Customer not found' });
+
         const customer = await prisma.customer.updateMany({
             where: { id: req.params.id, orgId: req.orgId },
             data: { name, phone, altPhone, address, aadharNumber, photoUrl, optOutWhatsapp },
@@ -107,8 +126,23 @@ async function updateCustomer(req, res, next) {
         if (customer.count === 0) return res.status(404).json({ error: 'Customer not found' });
 
         await logAudit({
-            orgId: req.orgId, userId: req.user.id,
-            action: 'customer_updated', entityType: 'customer', entityId: req.params.id,
+            orgId: req.orgId,
+            userId: req.user.id,
+            action: 'customer_updated',
+            entityType: 'customer',
+            entityId: req.params.id,
+            details: {
+                previous: {
+                    name: oldCustomer.name,
+                    phone: oldCustomer.phone,
+                    altPhone: oldCustomer.altPhone,
+                    address: oldCustomer.address,
+                    aadharNumber: oldCustomer.aadharNumber,
+                    photoUrl: oldCustomer.photoUrl,
+                    optOutWhatsapp: oldCustomer.optOutWhatsapp
+                },
+                updated: { name, phone, altPhone, address, aadharNumber, photoUrl, optOutWhatsapp }
+            }
         });
 
         const updated = await prisma.customer.findUnique({ where: { id: req.params.id } });

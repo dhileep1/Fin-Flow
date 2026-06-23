@@ -2,17 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import CallLogModal from '../components/CallLogModal';
-import { RotateCw, Phone, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RotateCw, Phone, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import '../styles/callPanel.css';
 
 const PAGE_SIZE = 10;
 
 export default function CallPanel() {
+    const { user } = useAuth();
     const [tasks, setTasks] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('all');
     const [selectedTask, setSelectedTask] = useState(null);
     const [dimmedRows, setDimmedRows] = useState(new Set());
+    const [search, setSearch] = useState('');
+    const [filterType, setFilterType] = useState('name');
+    const [statusFilter, setStatusFilter] = useState('');
 
     const [page, setPage] = useState(1);
     const navigate = useNavigate();
@@ -66,10 +71,47 @@ export default function CallPanel() {
 
 
 
-    const pagedTasks = sortedTasks.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    const filteredTasks = sortedTasks.filter(task => {
+        // 1. Assignment Filter
+        if (filter === 'mine') {
+            if (task.loan?.assignedStaffId !== user?.id && task.assignedStaffId !== user?.id) return false;
+        } else if (filter === 'unassigned') {
+            if (task.loan?.assignedStaffId || task.assignedStaffId) return false;
+        }
+
+        // 2. Search Query Filter
+        if (search.trim()) {
+            const query = search.toLowerCase().trim();
+            if (filterType === 'name') {
+                const name = task.loan?.customer?.name || '';
+                if (!name.toLowerCase().includes(query)) return false;
+            } else if (filterType === 'phone') {
+                const phone = task.loan?.customer?.phone || '';
+                if (!phone.includes(query)) return false;
+            } else if (filterType === 'vehicle') {
+                const model = task.loan?.vehicle?.model || '';
+                const number = task.loan?.vehicle?.vehicleNumber || '';
+                if (!model.toLowerCase().includes(query) && !number.toLowerCase().includes(query)) return false;
+            }
+        }
+
+        // 3. Status Filter (Promised, No Answer, Not Called, Connected)
+        if (statusFilter) {
+            const outcome = task.callLogs?.[0]?.outcome;
+            const hasCalled = !!task.lastCallDate;
+            if (statusFilter === 'promise' && outcome !== 'promise') return false;
+            if (statusFilter === 'no_answer' && outcome !== 'no_answer') return false;
+            if (statusFilter === 'not_called' && hasCalled) return false;
+            if (statusFilter === 'connected' && (!hasCalled || outcome === 'promise' || outcome === 'no_answer')) return false;
+        }
+
+        return true;
+    });
+
+    const pagedTasks = filteredTasks.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
     const startIdx = (page - 1) * PAGE_SIZE + 1;
-    const endIdx = Math.min(page * PAGE_SIZE, tasks.length);
-    const totalPages = Math.max(1, Math.ceil(tasks.length / PAGE_SIZE));
+    const endIdx = Math.min(page * PAGE_SIZE, filteredTasks.length);
+    const totalPages = Math.max(1, Math.ceil(filteredTasks.length / PAGE_SIZE));
 
     const renderStatusPill = (task) => {
         if (!task.lastCallDate) return <span className="badge badge-status badge-notcalled">N/A</span>;
@@ -88,19 +130,150 @@ export default function CallPanel() {
 
     return (
         <div className="call-panel animate-fade-in">
-            <div className="page-header">
+            <div className="page-header" style={{ marginBottom: 'var(--space-3)' }}>
                 <div>
                     <h1 className="page-title">Call Queue</h1>
-                    <p className="page-subtitle">Prioritized follow-up tasks for collections</p>
                 </div>
-                <div className="flex gap-3">
-                    <select className="form-select" value={filter} onChange={(e) => setFilter(e.target.value)}>
+            </div>
+
+            {/* Unified Search & Filter Controls Group */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', marginBottom: 'var(--space-4)' }}>
+                <div 
+                    className="unified-filter-group" 
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        background: 'var(--color-bg-input)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: '1.5rem',
+                        padding: '0 0.5rem',
+                        gap: '0.25rem',
+                        width: '100%',
+                        maxWidth: '720px',
+                        height: '42px',
+                        transition: 'all var(--transition-fast)',
+                        flex: 1
+                    }}
+                    onFocusCapture={(e) => {
+                        e.currentTarget.style.borderColor = 'var(--color-accent)';
+                        e.currentTarget.style.boxShadow = 'var(--shadow-glow)';
+                    }}
+                    onBlurCapture={(e) => {
+                        e.currentTarget.style.borderColor = 'var(--color-border)';
+                        e.currentTarget.style.boxShadow = 'none';
+                    }}
+                >
+                    {/* Search Icon */}
+                    <Search className="text-muted" size={16} style={{ marginLeft: '0.5rem', flexShrink: 0, color: 'var(--color-text-muted)' }} />
+
+                    {/* Search Input Box */}
+                    <input
+                        type="text"
+                        placeholder={`Search calls by ${filterType}...`}
+                        value={search}
+                        onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                        style={{
+                            flex: 1,
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            padding: '0.5rem',
+                            color: 'var(--color-text-primary)',
+                            fontSize: 'var(--font-size-base)',
+                            width: '100%'
+                        }}
+                    />
+
+                    {/* Divider */}
+                    <div style={{ width: '1px', height: '20px', background: 'var(--color-border)', flexShrink: 0 }} />
+
+                    {/* Search Type Dropdown */}
+                    <select
+                        value={filterType}
+                        onChange={(e) => { setFilterType(e.target.value); setPage(1); }}
+                        style={{
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            padding: '0.5rem 1.5rem 0.5rem 0.5rem',
+                            color: 'var(--color-text-secondary)',
+                            fontSize: 'var(--font-size-sm)',
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                            flexShrink: 0,
+                            minWidth: '95px',
+                            textTransform: 'capitalize'
+                        }}
+                    >
+                        <option value="name">Name</option>
+                        <option value="phone">Phone</option>
+                        <option value="vehicle">Vehicle</option>
+                    </select>
+
+                    {/* Divider */}
+                    <div style={{ width: '1px', height: '20px', background: 'var(--color-border)', flexShrink: 0 }} />
+
+                    {/* Status Dropdown */}
+                    <select
+                        value={statusFilter}
+                        onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+                        style={{
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            padding: '0.5rem 1.5rem 0.5rem 0.5rem',
+                            color: 'var(--color-text-secondary)',
+                            fontSize: 'var(--font-size-sm)',
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                            flexShrink: 0,
+                            minWidth: '130px'
+                        }}
+                    >
+                        <option value="">All Statuses</option>
+                        <option value="promise">Promised</option>
+                        <option value="no_answer">No Answer</option>
+                        <option value="not_called">Not Called</option>
+                        <option value="connected">Connected</option>
+                    </select>
+                </div>
+
+                <div className="flex gap-3" style={{ flexShrink: 0 }}>
+                    <select 
+                        className="form-select" 
+                        value={filter} 
+                        onChange={(e) => { setFilter(e.target.value); setPage(1); }}
+                        style={{
+                            height: '42px',
+                            borderRadius: '1.5rem',
+                            padding: '0 1.5rem 0 1rem',
+                            border: '1px solid var(--color-border)',
+                            background: 'var(--color-bg-input)',
+                            color: 'var(--color-text-secondary)',
+                            fontSize: 'var(--font-size-sm)',
+                            fontWeight: 500,
+                            cursor: 'pointer'
+                        }}
+                    >
                         <option value="all">All Tasks</option>
                         <option value="mine">Assigned to Me</option>
                         <option value="unassigned">Unassigned</option>
                     </select>
-                    <button className="btn btn-secondary" onClick={loadTasks}>
-                        <RotateCw size={16} /> Refresh
+                    <button 
+                        className="btn btn-secondary" 
+                        onClick={loadTasks}
+                        style={{
+                            height: '42px',
+                            borderRadius: '1.5rem',
+                            padding: '0 1.25rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            fontSize: 'var(--font-size-sm)',
+                            fontWeight: 600
+                        }}
+                    >
+                        <RotateCw size={14} /> Refresh
                     </button>
                 </div>
             </div>

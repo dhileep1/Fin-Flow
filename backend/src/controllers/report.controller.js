@@ -191,8 +191,12 @@ async function getDashboardStats(req, res, next) {
             })),
             recentLoans: recentLoans.map(l => ({
                 id: l.id,
+                loanNo: l.id.slice(0, 8).toUpperCase(),
+                billNo: l.vehicle.vehicleNumber,
                 customer: l.customer.name,
+                interestGiven: Number(l.monthlyInterestAmount || 0),
                 principal: Number(l.principalAmount),
+                documentFee: Number(l.documentFee || 0),
                 vehicle: l.vehicle.vehicleNumber,
                 disbursedBy: l.assignedStaff?.name || 'Admin'
             })),

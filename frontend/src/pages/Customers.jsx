@@ -46,7 +46,7 @@ const getOverallStanding = (customer) => {
 
     // Good Standing: If they have active loans and none are overdue
     const hasActive = customer.loans.some(l => l.status === 'active');
-    if (hasActive) return { label: 'Good Standing', color: 'badge-success' };
+    if (hasActive) return { label: 'Good', color: 'badge-success' };
 
     // If they have only closed loans and no defaulters
     return { label: 'Closed', color: 'badge-neutral' };
@@ -209,9 +209,11 @@ export default function Customers() {
                     <thead>
                         <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             <th className="px-6 py-4 text-left">Customer</th>
-                            <th className="px-6 py-4 text-center">Active Loans</th>
-                            <th className="px-6 py-4 text-center">Closed Loans</th>
-                            <th className="px-6 py-4 text-right">Total Outstanding</th>
+                            <th className="px-6 py-4 text-left">Phone</th>
+                            <th className="px-6 py-4 text-center">Active</th>
+                            <th className="px-6 py-4 text-center">Closed</th>
+                            <th className="px-6 py-4 text-right">Outstanding</th>
+                            <th className="px-6 py-4 text-left">Guarantor For</th>
                             <th className="px-6 py-4 text-center">Standing</th>
                             <th className="px-6 py-4 text-right">Actions</th>
                         </tr>
@@ -220,14 +222,14 @@ export default function Customers() {
                         {loading ? (
                             [...Array(5)].map((_, i) => (
                                 <tr key={i}>
-                                    {[...Array(6)].map((_, j) => (
+                                    {[...Array(8)].map((_, j) => (
                                         <td key={j}><div className="loading-skeleton" style={{ height: 16, width: '80%' }} /></td>
                                     ))}
                                 </tr>
                             ))
                         ) : customers.length === 0 ? (
                             <tr>
-                                <td colSpan={6}>
+                                <td colSpan={8}>
                                     <div className="empty-state-inline">
                                         <div className="empty-icon"><User size={24} /></div>
                                         <div className="empty-title">
@@ -245,6 +247,9 @@ export default function Customers() {
                                 const activeLoans = (c.loans || []).filter(l => l.status === 'active' || l.status === 'defaulter');
                                 const closedLoans = (c.loans || []).filter(l => l.status === 'closed' || l.status === 'completed' || l.status === 'settled');
                                 const totalOutstanding = activeLoans.reduce((sum, l) => sum + Number(l.outstandingPrincipal || 0), 0);
+                                const sortedGuarantors = [...(c.guarantorInstances || [])].sort(
+                                    (a, b) => new Date(a.loan.startDate || a.loan.createdAt) - new Date(b.loan.startDate || b.loan.createdAt)
+                                );
 
                                 return (
                                     <tr 
@@ -256,28 +261,21 @@ export default function Customers() {
                                         }}
                                     >
                                         <td className="px-6 py-4 text-left">
-                                            <div className="flex items-center gap-3">
-                                                <div className={`avatar avatar-sm ${getAvatarColor(c.name)}`}>
-                                                    {getInitials(c.name)}
-                                                </div>
-                                                <div>
-                                                    <div className="text-slate-900" style={{ fontWeight: 600 }}>{c.name}</div>
-                                                    <div className="text-xs text-slate-500 flex items-center gap-1">
-                                                        <Phone size={12} /> {c.phone}
-                                                    </div>
-                                                </div>
-                                            </div>
+                                            <div className="text-slate-900" style={{ fontWeight: 600 }}>{c.name}</div>
+                                        </td>
+                                        <td className="px-6 py-4 text-left text-slate-600 text-sm">
+                                            {c.phone}
                                         </td>
                                         <td className="px-6 py-4 text-center">
                                             {activeLoans.length > 0 ? (
-                                                <span className="font-semibold text-slate-900">{activeLoans.length} Active</span>
+                                                <span className="font-semibold text-slate-900">{activeLoans.length}</span>
                                             ) : (
                                                 <span className="text-slate-400">—</span>
                                             )}
                                         </td>
                                         <td className="px-6 py-4 text-center">
                                             {closedLoans.length > 0 ? (
-                                                <span className="text-slate-600">{closedLoans.length} Completed</span>
+                                                <span className="text-slate-600">{closedLoans.length}</span>
                                             ) : (
                                                 <span className="text-slate-400">—</span>
                                             )}
@@ -285,8 +283,24 @@ export default function Customers() {
                                         <td className="px-6 py-4 text-right font-bold text-slate-900">
                                             {totalOutstanding > 0 ? formatCurrency(totalOutstanding) : '₹0'}
                                         </td>
+                                        <td className="px-6 py-4 text-left text-sm text-slate-600">
+                                            {sortedGuarantors.length > 0 ? (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                    {sortedGuarantors.map((g, idx) => (
+                                                        <div key={idx} style={{ display: 'flex', gap: '4px', color: 'var(--slate-900)' }}>
+                                                            <span style={{ color: 'var(--slate-400)' }}>{idx + 1}.</span>
+                                                            <span style={{ fontWeight: 500 }}>
+                                                                {g.loan.customer.name}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-slate-400">—</span>
+                                            )}
+                                        </td>
                                         <td className="px-6 py-4 text-center">
-                                            <span className={`badge ${standing.color}`}>{standing.label}</span>
+                                            <span className={`badge badge-standing ${standing.color}`}>{standing.label}</span>
                                         </td>
                                         <td className="px-6 py-4 text-right">
                                             <div className="flex gap-2 justify-end">

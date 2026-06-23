@@ -662,6 +662,11 @@ tr.row-warning:hover td {
   text-transform: uppercase;
 }
 
+.badge-standing {
+  width: 100px;
+  justify-content: center;
+}
+
 .hover-table-row:hover td {
   background-color: var(--slate-50) !important;
 }

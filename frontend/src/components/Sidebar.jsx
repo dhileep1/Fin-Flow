@@ -11,13 +11,15 @@ import {
     LogOut,
     MessageCircle,
     ChevronLeft,
-    ChevronRight
+    ChevronRight,
+    Wallet
 } from 'lucide-react';
 import '../styles/sidebar.css';
 
 /* ── Navigation Groups ── */
 const primaryNav = [
     { path: '/', label: 'Dashboard', icon: Home, shortcut: 'Alt+D' },
+    { path: '/collections', label: 'Collections', icon: Wallet, shortcut: 'Alt+O' },
     { path: '/loans', label: 'Loans', icon: FileText, shortcut: 'Alt+L' },
     { path: '/calls', label: 'Call Queue', icon: PhoneCall, shortcut: 'Alt+K' },
     { path: '/whatsapp', label: 'Chat', icon: MessageCircle, shortcut: 'Alt+W' },

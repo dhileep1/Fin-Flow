@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import GlobalSearch from './GlobalSearch';
@@ -42,64 +42,114 @@ export default function Layout() {
 
 
 
-    /* ── Quick Payment state ── */
-    const [showQuickPayment, setShowQuickPayment] = useState(false);
-    const [quickQuery, setQuickQuery] = useState('');
-    const [quickLoan, setQuickLoan] = useState(null);
-    const [loadingLoan, setLoadingLoan] = useState(false);
-    const [quickError, setQuickError] = useState('');
-    const [quickResults, setQuickResults] = useState(null);
-
-    const openQuickPayment = () => {
-        setQuickQuery('');
-        setQuickLoan(null);
-        setQuickError('');
-        setQuickResults(null);
-        setShowQuickPayment(true);
+    const getNowString = () => {
+        const tzoffset = (new Date()).getTimezoneOffset() * 60000;
+        return (new Date(Date.now() - tzoffset)).toISOString().slice(0, 16);
     };
 
-    /* ── Debounced auto-search for quick payment ── */
+    /* ── Inline Payment state ── */
+    const [isInlineOpen, setIsInlineOpen] = useState(false);
+    const [inlineStep, setInlineStep] = useState('search'); // 'search' | 'amount'
+    const [inlineQuery, setInlineQuery] = useState('');
+    const [inlineResults, setInlineResults] = useState(null);
+    const [selectedLoan, setSelectedLoan] = useState(null);
+    const [amount, setAmount] = useState('');
+    const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' | 'upi' | 'bank'
+    const [paymentDate, setPaymentDate] = useState(getNowString());
+    const [submitting, setSubmitting] = useState(false);
+    const [error, setError] = useState('');
+    const [loadingLoan, setLoadingLoan] = useState(false);
+    const [successMsg, setSuccessMsg] = useState('');
+
+    const inlineRef = useRef(null);
+
+    // Debounced search for inline payment
     useEffect(() => {
-        if (!showQuickPayment || !quickQuery || quickQuery.trim().length < 2) {
-            setQuickResults(null);
+        if (!isInlineOpen || inlineStep !== 'search' || !inlineQuery || inlineQuery.trim().length < 2) {
+            setInlineResults(null);
             return;
         }
 
         const timeoutId = setTimeout(() => {
-            runQuickSearch();
-        }, 400); // 400ms debounce
+            runInlineSearch();
+        }, 400);
 
         return () => clearTimeout(timeoutId);
-    }, [quickQuery, showQuickPayment]);
+    }, [inlineQuery, isInlineOpen, inlineStep]);
 
-    const runQuickSearch = async () => {
-        if (!quickQuery || quickQuery.trim().length < 2) {
-            setQuickError('Type at least 2 characters to search');
-            setQuickResults(null);
+    // Click outside to close inline payment
+    useEffect(() => {
+        if (!isInlineOpen) return;
+        const handleClickOutside = (e) => {
+            if (inlineRef.current && !inlineRef.current.contains(e.target)) {
+                setIsInlineOpen(false);
+                resetInlineState();
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isInlineOpen]);
+
+    const resetInlineState = () => {
+        setInlineStep('search');
+        setInlineQuery('');
+        setInlineResults(null);
+        setSelectedLoan(null);
+        setAmount('');
+        setPaymentMethod('cash');
+        setPaymentDate(getNowString());
+        setError('');
+        setSuccessMsg('');
+    };
+
+    const runInlineSearch = async () => {
+        if (!inlineQuery || inlineQuery.trim().length < 2) {
+            setInlineResults(null);
             return;
         }
         setLoadingLoan(true);
-        setQuickError('');
+        setError('');
         try {
-            const data = await api.search(quickQuery.trim());
-            setQuickResults(data);
-            if (!data.loans || data.loans.length === 0) {
-                setQuickError('No matching loans found. Try a different name, phone, vehicle, or ID.');
-            }
+            const data = await api.search(inlineQuery.trim());
+            setInlineResults(data);
         } catch (e) {
-            setQuickResults(null);
-            setQuickError(e.message || 'Search failed');
+            setInlineResults(null);
+            setError(e.message || 'Search failed');
         } finally {
             setLoadingLoan(false);
         }
     };
 
-    const chooseQuickLoan = async (loan) => {
+    const handleSelectLoan = (loan) => {
+        setSelectedLoan(loan);
+        setInlineStep('amount');
+    };
+
+    const handleInlineSubmit = async (e) => {
+        if (e) e.preventDefault();
+        if (!amount || Number(amount) <= 0) {
+            setError('Please enter a valid amount');
+            return;
+        }
+        setSubmitting(true);
+        setError('');
         try {
-            const full = await api.getLoan(loan.id);
-            setQuickLoan(full);
-        } catch (e) {
-            setQuickError(e.message || 'Could not open loan');
+            await api.createPayment({
+                loanId: selectedLoan.id,
+                amount: Number(amount),
+                paymentMethod,
+                paymentDate,
+            });
+            setSuccessMsg('Payment recorded!');
+            setTimeout(() => {
+                setIsInlineOpen(false);
+                resetInlineState();
+                window.location.reload();
+            }, 1000);
+        } catch (err) {
+            setError(err.message || 'Payment failed');
+        } finally {
+            setSubmitting(false);
         }
     };
 
@@ -143,16 +193,176 @@ export default function Layout() {
                         <span className="navbar-cta-label">New Loan</span>
                     </button>
 
-                    {/* Secondary CTA */}
-                    <button
-                        className="navbar-cta navbar-cta-secondary"
-                        onClick={openQuickPayment}
-                        title="Record Payment"
-                        aria-label="Record a payment"
-                    >
-                        <IndianRupee size={18} />
-                        <span className="navbar-cta-label">Payment</span>
-                    </button>
+                    {/* Inline Payment Widget */}
+                    <div className={`inline-pay-wrapper ${isInlineOpen ? 'is-open' : ''}`} ref={inlineRef}>
+                        <button
+                            className="navbar-cta navbar-cta-secondary inline-pay-trigger-btn"
+                            onClick={() => {
+                                setIsInlineOpen(true);
+                                setInlineStep('search');
+                            }}
+                            title="Record Payment"
+                            aria-label="Record a payment"
+                            style={{
+                                opacity: isInlineOpen ? 0 : 1,
+                                pointerEvents: isInlineOpen ? 'none' : 'auto',
+                                position: isInlineOpen ? 'absolute' : 'relative',
+                                width: '100%'
+                            }}
+                        >
+                            <IndianRupee size={18} />
+                            <span className="navbar-cta-label">Payment</span>
+                        </button>
+
+                        {isInlineOpen && (
+                            <div className="inline-pay-panel">
+                                {inlineStep === 'search' ? (
+                                    <>
+                                        <div className="inline-pay-input-row">
+                                            <IndianRupee size={16} className="inline-pay-search-icon" />
+                                            <input
+                                                type="text"
+                                                className="inline-pay-panel-input"
+                                                placeholder="Search loan..."
+                                                value={inlineQuery}
+                                                onChange={(e) => setInlineQuery(e.target.value)}
+                                                autoFocus
+                                            />
+                                            {loadingLoan && <span className="inline-pay-spinner" />}
+                                            <button 
+                                                type="button" 
+                                                className="inline-pay-panel-close" 
+                                                onClick={() => { setIsInlineOpen(false); resetInlineState(); }}
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                        {/* Suggestions list */}
+                                        {inlineQuery.trim().length >= 2 && (
+                                            <div className="inline-pay-suggestions">
+                                                {loadingLoan ? (
+                                                    <div className="inline-pay-dropdown-loading">Searching...</div>
+                                                ) : inlineResults && inlineResults.loans && inlineResults.loans.length > 0 ? (
+                                                    inlineResults.loans.slice(0, 5).map((l) => (
+                                                        <div
+                                                            key={l.id}
+                                                            className="inline-pay-row"
+                                                            onClick={() => handleSelectLoan(l)}
+                                                        >
+                                                            <div className="inline-pay-row-left">
+                                                                <div className="inline-pay-customer-name">{l.customer?.name}</div>
+                                                                <div className="inline-pay-subtext">
+                                                                    {l.vehicle?.vehicleNumber || 'No Vehicle'} · {l.customer?.phone}
+                                                                </div>
+                                                            </div>
+                                                            <div className="inline-pay-row-right">
+                                                                <div className="inline-pay-subtext-right">O/S</div>
+                                                                <div className="inline-pay-amount-label">₹{Number(l.outstandingPrincipal || 0).toLocaleString('en-IN')}</div>
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                ) : inlineResults ? (
+                                                    <div className="inline-pay-dropdown-empty">No loans found</div>
+                                                ) : null}
+                                            </div>
+                                        )}
+                                    </>
+                                ) : (
+                                    <>
+                                        <div className="inline-pay-input-row inline-pay-pill-row">
+                                            <IndianRupee size={16} className="inline-pay-pill-icon" />
+                                            <span className="inline-pay-pill-text">Paying {selectedLoan?.customer?.name}</span>
+                                            <button 
+                                                type="button" 
+                                                className="inline-pay-panel-close" 
+                                                onClick={() => { setIsInlineOpen(false); resetInlineState(); }}
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                        <div className="inline-pay-details-content">
+                                            <div className="inline-pay-info-box">
+                                                <div className="inline-pay-info-name">{selectedLoan?.customer?.name}</div>
+                                                <div className="inline-pay-info-os">O/S: ₹{Number(selectedLoan?.outstandingPrincipal || 0).toLocaleString('en-IN')}</div>
+                                            </div>
+                                            
+                                            {error && <div className="inline-pay-error">{error}</div>}
+                                            {successMsg && <div className="inline-pay-success">{successMsg}</div>}
+
+                                            {!successMsg && (
+                                                <>
+                                                    <div className="inline-pay-form-group">
+                                                        <label className="inline-pay-field-label">Amount</label>
+                                                        <div className="inline-pay-input-wrapper">
+                                                            <span className="inline-pay-field-currency">₹</span>
+                                                            <input
+                                                                type="number"
+                                                                className="inline-pay-field-input"
+                                                                placeholder="Enter amount"
+                                                                value={amount}
+                                                                onChange={(e) => setAmount(e.target.value)}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') handleInlineSubmit();
+                                                                }}
+                                                                autoFocus
+                                                            />
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="inline-pay-form-group">
+                                                        <label className="inline-pay-field-label">Payment Type</label>
+                                                        <div className="inline-pay-methods-row">
+                                                            <button
+                                                                type="button"
+                                                                className={`inline-pay-method-btn ${paymentMethod === 'cash' ? 'active' : ''}`}
+                                                                onClick={() => setPaymentMethod('cash')}
+                                                            >
+                                                                Cash
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className={`inline-pay-method-btn ${paymentMethod === 'upi' ? 'active' : ''}`}
+                                                                onClick={() => setPaymentMethod('upi')}
+                                                            >
+                                                                UPI
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className={`inline-pay-method-btn ${paymentMethod === 'bank' ? 'active' : ''}`}
+                                                                onClick={() => setPaymentMethod('bank')}
+                                                            >
+                                                                Bank
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="inline-pay-form-group">
+                                                        <label className="inline-pay-field-label">Payment Date & Time</label>
+                                                        <input
+                                                            type="datetime-local"
+                                                            className="inline-pay-datetime-input"
+                                                            value={paymentDate}
+                                                            onChange={(e) => setPaymentDate(e.target.value)}
+                                                        />
+                                                    </div>
+
+                                                    <button
+                                                        type="button"
+                                                        className="inline-pay-submit-btn"
+                                                        onClick={handleInlineSubmit}
+                                                        disabled={submitting}
+                                                        style={{ marginTop: 'var(--space-2)' }}
+                                                    >
+                                                        {submitting ? 'Recording...' : `Record Payment`}
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        )}
+                    </div>
 
                     <div className="navbar-divider" aria-hidden="true" />
 
@@ -192,7 +402,7 @@ export default function Layout() {
                     aria-hidden="true"
                 />
             )}
-            <div className={`app-layout ${sidebarCollapsed ? 'sidebar-is-collapsed' : ''}`}>
+            <div className={`app-layout ${sidebarCollapsed ? 'sidebar-is-collapsed' : ''} ${location.pathname === '/whatsapp' ? 'layout-no-scroll' : ''}`}>
                 <div className={mobileMenuOpen ? 'sidebar-mobile-open-wrapper' : ''}>
                     <Sidebar
                         collapsed={sidebarCollapsed}
@@ -210,98 +420,7 @@ export default function Layout() {
                 </div>
             </div>
 
-            {/* ═══ QUICK PAYMENT MODAL ═══ */}
-            {showQuickPayment && !quickLoan && (
-                <div className="modal-overlay" onClick={() => setShowQuickPayment(false)}>
-                    <div className="modal" onClick={(e) => e.stopPropagation()}>
-                        <div className="modal-header">
-                            <h2>Record Payment</h2>
-                            <button
-                                className="btn btn-ghost"
-                                type="button"
-                                onClick={() => setShowQuickPayment(false)}
-                            >
-                                ✕
-                            </button>
-                        </div>
-                        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-                            {quickError && <div className="login-error">{quickError}</div>}
-                            <div className="form-group relative">
-                                <label className="form-label">Find loan by name, phone, vehicle, or ID</label>
-                                <div style={{ position: 'relative' }}>
-                                    <input
-                                        className="form-input"
-                                        value={quickQuery}
-                                        onChange={(e) => setQuickQuery(e.target.value)}
-                                        placeholder="Type at least 2 characters to search"
-                                        autoFocus
-                                    />
-                                    {loadingLoan && (
-                                        <div style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)' }}>
-                                            <span className="loading-spinner" style={{ width: '16px', height: '16px' }} />
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
 
-                            {!loadingLoan && quickResults && quickResults.loans && quickResults.loans.length > 0 && (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', marginTop: 'var(--space-2)', maxHeight: '300px', overflowY: 'auto', paddingRight: '4px' }}>
-                                    {quickResults.loans.slice(0, 5).map((l) => (
-                                        <div
-                                            key={l.id}
-                                            className="card-glass hover:border-slate-300 transition-all cursor-pointer"
-                                            style={{ padding: 'var(--space-3)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                                            onClick={() => chooseQuickLoan(l)}
-                                        >
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                                <div style={{ fontWeight: 600, color: 'var(--slate-900)', fontSize: '14px' }}>
-                                                    {l.customer?.name}
-                                                </div>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--slate-500)' }}>
-                                                    <span className="font-mono">{l.customer?.phone}</span>
-                                                    <span style={{ opacity: 0.3 }}>|</span>
-                                                    <span>{l.vehicle?.vehicleNumber || 'No Vehicle'}</span>
-                                                </div>
-                                            </div>
-                                            <div style={{ textAlign: 'right' }}>
-                                                <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Outstanding</div>
-                                                <div style={{ fontWeight: 700, color: 'var(--color-warning)', fontSize: '15px' }}>
-                                                    ₹{Number(l.outstandingPrincipal || 0).toLocaleString('en-IN')}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-
-                            {!loadingLoan && quickResults && quickResults.loans && quickResults.loans.length === 0 && quickQuery.length >= 2 && (
-                                <div style={{ textAlign: 'center', padding: 'var(--space-6)', color: 'var(--slate-400)' }}>
-                                    No loans found for "<strong>{quickQuery}</strong>"
-                                </div>
-                            )}
-                        </div>
-                        <div className="modal-footer">
-                            <button
-                                type="button"
-                                className="btn btn-secondary"
-                                onClick={() => setShowQuickPayment(false)}
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {showQuickPayment && quickLoan && (
-                <PaymentModal
-                    loanId={quickLoan.id}
-                    customerName={quickLoan.customer?.name}
-                    outstanding={Number(quickLoan.outstandingPrincipal)}
-                    onClose={() => { setShowQuickPayment(false); setQuickLoan(null); }}
-                    onSuccess={() => { setShowQuickPayment(false); setQuickLoan(null); }}
-                />
-            )}
         </div>
     );
 }

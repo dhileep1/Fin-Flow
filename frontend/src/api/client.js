@@ -108,8 +108,12 @@ class ApiClient {
 
     // --- Payments ---
     createPayment(data) { return this.post('/payments', data); }
-    getPayments(loanId) { return this.get(`/payments?loanId=${loanId}`); }
+    getPayments(loanId) { return this.get(loanId ? `/payments?loanId=${loanId}` : '/payments'); }
     getReceipt(paymentId) { return this.get(`/payments/${paymentId}/receipt`); }
+
+    // --- Expenses ---
+    createExpense(data) { return this.post('/expenses', data); }
+    getExpenses() { return this.get('/expenses'); }
 
     // --- Call Tasks ---
     getCallTasks(params = '') { return this.get(`/call-tasks?${params}`); }
@@ -132,6 +136,10 @@ class ApiClient {
     getUsers() { return this.get('/admin/users'); }
     createUser(data) { return this.post('/admin/users', data); }
     updateUser(id, data) { return this.put(`/admin/users/${id}`, data); }
+    getAuditLogs(page = 1, limit = 10) { return this.get(`/admin/audit-logs?page=${page}&limit=${limit}`); }
+    revertAuditLog(id) { return this.post(`/admin/audit-logs/${id}/revert`); }
+    getAuditLogEntity(entityType, entityId) { return this.get(`/admin/audit-logs/entity/${entityType}/${entityId}`); }
+    updateAuditLogEntity(entityType, entityId, data) { return this.put(`/admin/audit-logs/entity/${entityType}/${entityId}`, data); }
 }
 
 const api = new ApiClient();

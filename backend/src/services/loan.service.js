@@ -175,11 +175,39 @@ async function getLoanById(orgId, loanId) {
 /**
  * List loans for an org with optional filters.
  */
-async function listLoans(orgId, { status, customerId, assignedStaffId, page = 1, limit = 25 } = {}) {
+async function listLoans(orgId, { status, customerId, assignedStaffId, page = 1, limit = 25, q, type } = {}) {
     const where = { orgId };
-    if (status) where.status = status;
+    if (status) {
+        if (status === 'overdue') {
+            where.status = 'active';
+            where.loanDues = {
+                some: {
+                    status: { not: 'paid' },
+                    dueDate: { lt: new Date() }
+                }
+            };
+        } else {
+            where.status = status;
+        }
+    }
     if (customerId) where.customerId = customerId;
     if (assignedStaffId) where.assignedStaffId = assignedStaffId;
+
+    if (q && q.trim()) {
+        const queryStr = q.trim();
+        if (type === 'name') {
+            where.customer = { name: { contains: queryStr, mode: 'insensitive' } };
+        } else if (type === 'phone') {
+            where.customer = { phone: { contains: queryStr } };
+        } else if (type === 'vehicle') {
+            where.vehicle = {
+                OR: [
+                    { vehicleNumber: { contains: queryStr, mode: 'insensitive' } },
+                    { model: { contains: queryStr, mode: 'insensitive' } }
+                ]
+            };
+        }
+    }
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -201,7 +229,11 @@ async function listLoans(orgId, { status, customerId, assignedStaffId, page = 1,
                     }
                 }
             },
-            orderBy: { createdAt: 'desc' },
+            orderBy: {
+                customer: {
+                    name: 'asc'
+                }
+            },
             skip: (page - 1) * limit,
             take: limit,
         }),

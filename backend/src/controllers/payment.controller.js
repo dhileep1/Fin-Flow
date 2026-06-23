@@ -3,7 +3,7 @@ const receiptService = require('../services/receipt.service');
 
 async function createPayment(req, res, next) {
     try {
-        const { loanId, amount, paymentMethod, referenceNumber } = req.body;
+        const { loanId, amount, paymentMethod, referenceNumber, paymentDate } = req.body;
 
         if (!loanId || !amount) {
             return res.status(400).json({ error: 'loanId and amount are required' });
@@ -20,6 +20,7 @@ async function createPayment(req, res, next) {
             paymentMethod,
             referenceNumber,
             createdBy: req.user.id,
+            paymentDate,
         });
 
         res.status(201).json(result);
@@ -31,10 +32,13 @@ async function createPayment(req, res, next) {
 async function getPayments(req, res, next) {
     try {
         const loanId = req.params.loanId || req.query.loanId;
-        if (!loanId) return res.status(400).json({ error: 'loanId is required' });
-
-        const payments = await paymentService.getPaymentsByLoan(req.orgId, loanId);
-        res.json(payments);
+        if (loanId) {
+            const payments = await paymentService.getPaymentsByLoan(req.orgId, loanId);
+            return res.json(payments);
+        } else {
+            const payments = await paymentService.getAllPayments(req.orgId);
+            return res.json(payments);
+        }
     } catch (err) {
         next(err);
     }

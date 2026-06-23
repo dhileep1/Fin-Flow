@@ -23,7 +23,7 @@
         0 20px 40px -12px rgba(15, 23, 42, 0.08);
     border-radius: 1.5rem;
     overflow: hidden;
-    margin-top: 2rem;
+    margin-top: 0.5rem;
 }
 
 .call-panel-unified-table {
@@ -63,7 +63,7 @@
 
 /* --- Body Cells --- */
 .call-panel-unified-table tbody tr {
-    height: 72px;
+    height: 64px;
     transition: all 0.2s ease;
     cursor: pointer;
 }
@@ -148,4 +148,11 @@
 .empty-state-inline {
     padding: 4rem;
     text-align: center;
+}
+
+@keyframes loadingProgress {
+    0% { transform: scaleX(0); transform-origin: left; }
+    50% { transform: scaleX(1); transform-origin: left; }
+    50.1% { transform-origin: right; }
+    100% { transform: scaleX(0); transform-origin: right; }
 }
