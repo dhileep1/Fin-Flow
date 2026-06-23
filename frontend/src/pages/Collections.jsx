@@ -26,16 +26,6 @@ const formatDate = (d) => {
     return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
-// Default tags per category
-const CATEGORY_DEFAULT_TAGS = {
-    rent: ['rent', 'office', 'monthly'],
-    salary: ['salary', 'staff', 'monthly'],
-    utilities: ['electricity', 'water', 'internet', 'bills'],
-    office: ['stationary', 'pantry', 'assets'],
-    marketing: ['ads', 'promotions', 'print'],
-    others: ['miscellaneous']
-};
-
 export default function Collections() {
     const [payments, setPayments] = useState([]);
     const [loans, setLoans] = useState([]);
@@ -44,7 +34,7 @@ export default function Collections() {
     
     // Tab and filter states
     const [activeTab, setActiveTab] = useState('payments'); // 'payments' | 'docCharges' | 'expenses'
-    const [dateFilter, setDateFilter] = useState('all'); // 'all' | 'today' | 'week' | 'month' | 'custom'
+    const [dateFilter, setDateFilter] = useState('month'); // 'all' | 'today' | 'week' | 'month' | 'custom'
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
@@ -60,8 +50,6 @@ export default function Collections() {
     const [expenseCategory, setExpenseCategory] = useState('rent');
     const [expenseDesc, setExpenseDesc] = useState('');
     const [expenseDate, setExpenseDate] = useState('');
-    const [selectedTags, setSelectedTags] = useState(CATEGORY_DEFAULT_TAGS.rent);
-    const [customTagInput, setCustomTagInput] = useState('');
     const [submittingExpense, setSubmittingExpense] = useState(false);
     const [modalError, setModalError] = useState('');
 
@@ -88,25 +76,6 @@ export default function Collections() {
         })();
     }, []);
 
-    // Sync default tags when category changes in modal
-    useEffect(() => {
-        setSelectedTags(CATEGORY_DEFAULT_TAGS[expenseCategory] || []);
-    }, [expenseCategory]);
-
-    // Handle adding custom tag
-    const handleAddCustomTag = () => {
-        const tag = customTagInput.trim().toLowerCase();
-        if (tag && !selectedTags.includes(tag)) {
-            setSelectedTags([...selectedTags, tag]);
-        }
-        setCustomTagInput('');
-    };
-
-    // Handle removing tag
-    const handleRemoveTag = (tagToRemove) => {
-        setSelectedTags(selectedTags.filter(t => t !== tagToRemove));
-    };
-
     // Handle submitting new expense
     const handleAddExpenseSubmit = async (e) => {
         if (e) e.preventDefault();
@@ -121,7 +90,6 @@ export default function Collections() {
                 amount: Number(expenseAmount),
                 category: expenseCategory,
                 description: expenseDesc,
-                tags: selectedTags,
                 expenseDate: expenseDate || undefined
             });
             
@@ -134,7 +102,6 @@ export default function Collections() {
             setExpenseCategory('rent');
             setExpenseDesc('');
             setExpenseDate('');
-            setSelectedTags(CATEGORY_DEFAULT_TAGS.rent);
         } catch (err) {
             setModalError(err.message || 'Failed to add expense');
         } finally {
@@ -448,14 +415,31 @@ export default function Collections() {
                 </div>
 
                 {activeTab === 'expenses' && (
-                    <button
-                        className="btn btn-primary"
-                        onClick={() => setShowExpenseModal(true)}
-                        style={{ display: 'flex', alignItems: 'center', gap: '8px', borderRadius: '10px', padding: '8px 16px', fontSize: '13px' }}
-                    >
-                        <PlusCircle size={16} />
-                        Add Expense
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                        <div style={{ 
+                            background: '#fef2f2', 
+                            border: '1px solid #fee2e2', 
+                            padding: '6px 14px', 
+                            borderRadius: '10px', 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: '8px',
+                            fontSize: '13px',
+                            fontWeight: 600,
+                            color: 'rgb(239, 68, 68)'
+                        }}>
+                            <span style={{ color: '#ef4444', textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.5px' }}>Total Expenses:</span>
+                            <span>{fmt(totals.totalExpenseAmt)}</span>
+                        </div>
+                        <button
+                            className="btn btn-primary"
+                            onClick={() => setShowExpenseModal(true)}
+                            style={{ display: 'flex', alignItems: 'center', gap: '8px', borderRadius: '10px', padding: '8px 16px', fontSize: '13px' }}
+                        >
+                            <PlusCircle size={16} />
+                            Add Expense
+                        </button>
+                    </div>
                 )}
             </div>
 
@@ -594,141 +578,99 @@ export default function Collections() {
             </div>
 
             {/* Summary Cards */}
-            <div className="cmd-grid-3" style={{ marginBottom: 'var(--space-6)' }}>
-                {activeTab === 'payments' ? (
-                    <>
-                        <div className="progress-card">
-                            <div className="progress-card__icon-circle progress-card__icon-circle--emerald">
-                                <Wallet size={24} />
-                            </div>
-                            <div className="progress-card__body">
-                                <span className="progress-card__title">Total Collected</span>
-                                <div className="progress-card__values">
-                                    <span className="progress-card__actual" style={{ color: 'var(--color-success)' }}>
-                                        {fmt(totals.totalAmount)}
-                                    </span>
+            {activeTab !== 'expenses' && (
+                <div className="cmd-grid-3" style={{ marginBottom: 'var(--space-6)' }}>
+                    {activeTab === 'payments' ? (
+                        <>
+                            <div className="progress-card">
+                                <div className="progress-card__icon-circle progress-card__icon-circle--emerald">
+                                    <Wallet size={24} />
+                                </div>
+                                <div className="progress-card__body">
+                                    <span className="progress-card__title">Total Collected</span>
+                                    <div className="progress-card__values">
+                                        <span className="progress-card__actual" style={{ color: 'var(--color-success)' }}>
+                                            {fmt(totals.totalAmount)}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <div className="progress-card">
-                            <div className="progress-card__icon-circle progress-card__icon-circle--blue">
-                                <TrendingUp size={24} />
-                            </div>
-                            <div className="progress-card__body">
-                                <span className="progress-card__title">Principal Portion</span>
-                                <div className="progress-card__values">
-                                    <span className="progress-card__actual" style={{ color: 'var(--slate-900)' }}>
-                                        {fmt(totals.totalPrincipal)}
-                                    </span>
+                            <div className="progress-card">
+                                <div className="progress-card__icon-circle progress-card__icon-circle--blue">
+                                    <TrendingUp size={24} />
+                                </div>
+                                <div className="progress-card__body">
+                                    <span className="progress-card__title">Principal Portion</span>
+                                    <div className="progress-card__values">
+                                        <span className="progress-card__actual" style={{ color: 'var(--slate-900)' }}>
+                                            {fmt(totals.totalPrincipal)}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <div className="progress-card">
-                            <div className="progress-card__icon-circle progress-card__icon-circle--amber">
-                                <TrendingUp size={24} />
-                            </div>
-                            <div className="progress-card__body">
-                                <span className="progress-card__title">Interest Portion</span>
-                                <div className="progress-card__values">
-                                    <span className="progress-card__actual" style={{ color: 'var(--color-warning)' }}>
-                                        {fmt(totals.totalInterest)}
-                                    </span>
+                            <div className="progress-card">
+                                <div className="progress-card__icon-circle progress-card__icon-circle--amber">
+                                    <TrendingUp size={24} />
+                                </div>
+                                <div className="progress-card__body">
+                                    <span className="progress-card__title">Interest Portion</span>
+                                    <div className="progress-card__values">
+                                        <span className="progress-card__actual" style={{ color: 'var(--color-warning)' }}>
+                                            {fmt(totals.totalInterest)}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    </>
-                ) : activeTab === 'docCharges' ? (
-                    <>
-                        <div className="progress-card">
-                            <div className="progress-card__icon-circle progress-card__icon-circle--emerald">
-                                <Receipt size={24} />
-                            </div>
-                            <div className="progress-card__body">
-                                <span className="progress-card__title">Document Charges Collected</span>
-                                <div className="progress-card__values">
-                                    <span className="progress-card__actual" style={{ color: 'var(--color-success)' }}>
-                                        {fmt(totals.totalDocCharges)}
-                                    </span>
+                        </>
+                    ) : (
+                        <>
+                            <div className="progress-card">
+                                <div className="progress-card__icon-circle progress-card__icon-circle--emerald">
+                                    <Receipt size={24} />
+                                </div>
+                                <div className="progress-card__body">
+                                    <span className="progress-card__title">Document Charges Collected</span>
+                                    <div className="progress-card__values">
+                                        <span className="progress-card__actual" style={{ color: 'var(--color-success)' }}>
+                                            {fmt(totals.totalDocCharges)}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <div className="progress-card">
-                            <div className="progress-card__icon-circle progress-card__icon-circle--blue">
-                                <Landmark size={24} />
-                            </div>
-                            <div className="progress-card__body">
-                                <span className="progress-card__title">Total Loans Issued</span>
-                                <div className="progress-card__values">
-                                    <span className="progress-card__actual" style={{ color: 'var(--slate-900)' }}>
-                                        {fmt(totals.totalLoanAmount)}
-                                    </span>
+                            <div className="progress-card">
+                                <div className="progress-card__icon-circle progress-card__icon-circle--blue">
+                                    <Landmark size={24} />
+                                </div>
+                                <div className="progress-card__body">
+                                    <span className="progress-card__title">Total Loans Issued</span>
+                                    <div className="progress-card__values">
+                                        <span className="progress-card__actual" style={{ color: 'var(--slate-900)' }}>
+                                            {fmt(totals.totalLoanAmount)}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <div className="progress-card">
-                            <div className="progress-card__icon-circle progress-card__icon-circle--slate">
-                                <Hash size={24} />
-                            </div>
-                            <div className="progress-card__body">
-                                <span className="progress-card__title">Total Loans Count</span>
-                                <div className="progress-card__values">
-                                    <span className="progress-card__actual" style={{ color: 'var(--slate-700)' }}>
-                                        {filteredLoans.length} Loans
-                                    </span>
+                            <div className="progress-card">
+                                <div className="progress-card__icon-circle progress-card__icon-circle--slate">
+                                    <Hash size={24} />
+                                </div>
+                                <div className="progress-card__body">
+                                    <span className="progress-card__title">Total Loans Count</span>
+                                    <div className="progress-card__values">
+                                        <span className="progress-card__actual" style={{ color: 'var(--slate-700)' }}>
+                                            {filteredLoans.length} Loans
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    </>
-                ) : (
-                    <>
-                        <div className="progress-card">
-                            <div className="progress-card__icon-circle progress-card__icon-circle--danger" style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'rgb(239, 68, 68)' }}>
-                                <ArrowDownCircle size={24} />
-                            </div>
-                            <div className="progress-card__body">
-                                <span className="progress-card__title">Total Expenses</span>
-                                <div className="progress-card__values">
-                                    <span className="progress-card__actual" style={{ color: 'rgb(239, 68, 68)' }}>
-                                        {fmt(totals.totalExpenseAmt)}
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="progress-card">
-                            <div className="progress-card__icon-circle progress-card__icon-circle--blue">
-                                <Landmark size={24} />
-                            </div>
-                            <div className="progress-card__body">
-                                <span className="progress-card__title">Rent Paid</span>
-                                <div className="progress-card__values">
-                                    <span className="progress-card__actual" style={{ color: 'var(--slate-900)' }}>
-                                        {fmt(totals.totalRentAmt)}
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="progress-card">
-                            <div className="progress-card__icon-circle progress-card__icon-circle--emerald">
-                                <User size={24} />
-                            </div>
-                            <div className="progress-card__body">
-                                <span className="progress-card__title">Salary Paid</span>
-                                <div className="progress-card__values">
-                                    <span className="progress-card__actual" style={{ color: 'var(--color-success)' }}>
-                                        {fmt(totals.totalSalaryAmt)}
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                    </>
-                )}
-            </div>
+                        </>
+                    )}
+                </div>
+            )}
 
             {/* Content Tables */}
             {activeTab === 'payments' ? (
@@ -938,7 +880,6 @@ export default function Collections() {
                                     <th className="px-6 py-4 text-left">Date</th>
                                     <th className="px-6 py-4 text-left">Category</th>
                                     <th className="px-6 py-4 text-left">Description</th>
-                                    <th className="px-6 py-4 text-left">Tags</th>
                                     <th className="px-6 py-4 text-center">Amount</th>
                                     <th className="px-6 py-4 text-center">Recorded By</th>
                                 </tr>
@@ -946,7 +887,7 @@ export default function Collections() {
                             <tbody className="divide-y divide-slate-100">
                                 {pagedExpenses.length === 0 ? (
                                     <tr>
-                                        <td colSpan={6}>
+                                        <td colSpan={5}>
                                             <div className="empty-state-inline" style={{ padding: 'var(--space-8) 0' }}>
                                                 <div className="empty-icon" style={{ display: 'inline-flex', padding: '12px', background: 'var(--slate-100)', borderRadius: '50%', color: 'var(--slate-400)', marginBottom: '12px' }}>
                                                     <ArrowDownCircle size={24} />
@@ -966,19 +907,6 @@ export default function Collections() {
                                                 <span className="text-slate-900 font-semibold" style={{ textTransform: 'capitalize' }}>{e.category}</span>
                                             </td>
                                             <td className="px-6 py-4 text-left text-slate-600">{e.description || '—'}</td>
-                                            <td className="px-6 py-4 text-left">
-                                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                                                    {e.tags && e.tags.length > 0 ? (
-                                                        e.tags.map(t => (
-                                                            <span key={t} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--color-accent, #10b981)' }}>
-                                                                {t}
-                                                            </span>
-                                                        ))
-                                                    ) : (
-                                                        <span className="text-slate-400">—</span>
-                                                    )}
-                                                </div>
-                                            </td>
                                             <td className="px-6 py-4 text-center">
                                                 <span className="text-slate-900 font-extrabold" style={{ color: 'rgb(239, 68, 68)' }}>{fmtShort(Number(e.amount))}</span>
                                             </td>
@@ -1119,66 +1047,7 @@ export default function Collections() {
                                 </select>
                             </div>
 
-                            {/* Tags Section */}
-                            <div className="form-group">
-                                <label className="form-label" style={{ fontSize: '13px', fontWeight: 600, marginBottom: '6px', display: 'block' }}>Tags</label>
-                                
-                                {/* Selected tags list */}
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-                                    {selectedTags.map(tag => (
-                                        <span 
-                                            key={tag}
-                                            style={{
-                                                display: 'inline-flex',
-                                                alignItems: 'center',
-                                                gap: '4px',
-                                                padding: '4px 8px',
-                                                background: 'rgba(16, 185, 129, 0.1)',
-                                                color: 'var(--color-accent, #10b981)',
-                                                borderRadius: '8px',
-                                                fontSize: '12px',
-                                                fontWeight: 500
-                                            }}
-                                        >
-                                            {tag}
-                                            <X 
-                                                size={12} 
-                                                onClick={() => handleRemoveTag(tag)} 
-                                                style={{ cursor: 'pointer', opacity: 0.7 }}
-                                            />
-                                        </span>
-                                    ))}
-                                    {selectedTags.length === 0 && (
-                                        <span style={{ fontSize: '12px', color: '#94a3b8', fontStyle: 'italic' }}>No tags selected</span>
-                                    )}
-                                </div>
 
-                                {/* Custom tag input */}
-                                <div style={{ display: 'flex', gap: '8px' }}>
-                                    <input 
-                                        type="text"
-                                        className="form-input"
-                                        placeholder="Add custom tag..."
-                                        value={customTagInput}
-                                        onChange={(e) => setCustomTagInput(e.target.value)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter') {
-                                                e.preventDefault();
-                                                handleAddCustomTag();
-                                            }
-                                        }}
-                                        style={{ borderRadius: '8px', height: '34px', fontSize: '13px' }}
-                                    />
-                                    <button 
-                                        type="button" 
-                                        onClick={handleAddCustomTag}
-                                        className="btn btn-secondary"
-                                        style={{ height: '34px', fontSize: '12px', padding: '0 12px', borderRadius: '8px' }}
-                                    >
-                                        Add
-                                    </button>
-                                </div>
-                            </div>
 
                             {/* Date */}
                             <div className="form-group">
