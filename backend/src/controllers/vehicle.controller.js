@@ -16,7 +16,23 @@ async function listVehicles(req, res, next) {
         const [vehicles, total] = await Promise.all([
             prisma.vehicle.findMany({
                 where,
-                include: { customer: { select: { id: true, name: true, phone: true } } },
+                include: { 
+                    customer: { select: { id: true, name: true, phone: true } },
+                    seizures: {
+                        orderBy: { createdAt: 'desc' },
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    name: true
+                                }
+                            }
+                        }
+                    },
+                    loans: {
+                        orderBy: { createdAt: 'desc' }
+                    }
+                },
                 orderBy: { createdAt: 'desc' },
                 skip: (Number(page) - 1) * Number(limit),
                 take: Number(limit),

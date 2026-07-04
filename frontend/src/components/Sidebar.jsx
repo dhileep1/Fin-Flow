@@ -12,7 +12,8 @@ import {
     MessageCircle,
     ChevronLeft,
     ChevronRight,
-    Wallet
+    Wallet,
+    Bike
 } from 'lucide-react';
 import '../styles/sidebar.css';
 
@@ -24,6 +25,7 @@ const primaryNav = [
     { path: '/calls', label: 'Call Queue', icon: PhoneCall, shortcut: 'Alt+K' },
     { path: '/whatsapp', label: 'Chat', icon: MessageCircle, shortcut: 'Alt+W' },
     { path: '/customers', label: 'Customers', icon: Users, shortcut: 'Alt+C' },
+    { path: '/vehicles', label: 'Vehicles', icon: Bike, shortcut: 'Alt+V' },
     { path: '/reports', label: 'Reports', icon: BarChart3, shortcut: 'Alt+R' },
 ];
 

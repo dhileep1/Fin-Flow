@@ -29,6 +29,7 @@ model Organization {
   auditLogs     AuditLog[]
   guarantors    Guarantor[]
   expenses      Expense[]
+  seizures      VehicleSeizure[]
 
   @@map("organizations")
 }
@@ -50,6 +51,7 @@ model User {
   callLogs       CallLog[]
   payments       Payment[]     @relation("PaymentCreator")
   expenses       Expense[]     @relation("ExpenseCreator")
+  seizures       VehicleSeizure[] @relation("SeizureExecutor")
 
   @@index([orgId, phone])
   @@map("users")
@@ -87,11 +89,13 @@ model Vehicle {
   chassisNumber   String?  @map("chassis_number")
   rcImageUrl      String?  @map("rc_image_url")
   insuranceValidTill DateTime? @map("insurance_valid_till")
+  status          String   @default("active")
   createdAt       DateTime @default(now()) @map("created_at")
 
   org      Organization @relation(fields: [orgId], references: [id])
   customer Customer     @relation(fields: [customerId], references: [id])
   loans    Loan[]
+  seizures VehicleSeizure[]
 
   @@index([orgId, vehicleNumber])
   @@map("vehicles")
@@ -150,6 +154,7 @@ model Loan {
   notifications Notification[]
   callTasks     CallTask[]
   guarantors    Guarantor[]
+  seizures      VehicleSeizure[]
 
   @@index([orgId, nextDueDate])
   @@index([orgId, assignedStaffId])
@@ -322,4 +327,29 @@ model Expense {
   creator User?        @relation("ExpenseCreator", fields: [createdBy], references: [id])
 
   @@map("expenses")
+}
+
+model VehicleSeizure {
+  id              String   @id @default(uuid()) @db.Uuid
+  orgId           String   @map("org_id") @db.Uuid
+  vehicleId       String   @map("vehicle_id") @db.Uuid
+  loanId          String   @map("loan_id") @db.Uuid
+  seizedBy        String   @map("seized_by") @db.Uuid
+  seizureDate     DateTime @default(now()) @map("seizure_date")
+  yardLocation    String?  @map("yard_location")
+  valuationAmount Decimal? @map("valuation_amount") @db.Decimal(18, 2)
+  status          String   @default("in_yard")
+  notes           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  org             Organization @relation(fields: [orgId], references: [id])
+  vehicle         Vehicle      @relation(fields: [vehicleId], references: [id])
+  loan            Loan         @relation(fields: [loanId], references: [id])
+  user            User         @relation("SeizureExecutor", fields: [seizedBy], references: [id])
+
+  @@index([orgId])
+  @@index([vehicleId])
+  @@index([loanId])
+  @@index([seizedBy])
+  @@map("vehicle_seizures")
 }

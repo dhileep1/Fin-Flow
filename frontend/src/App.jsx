@@ -14,6 +14,7 @@ import Reports from './pages/Reports';
 import AdminConfig from './pages/AdminConfig';
 import CustomerLoans from './pages/CustomerLoans';
 import Collections from './pages/Collections';
+import VehicleInventory from './pages/VehicleInventory';
 
 function ProtectedRoute({ children }) {
     const { isAuthenticated } = useAuth();
@@ -41,6 +42,7 @@ function AppRoutes() {
                 <Route path="loans/new" element={<NewLoan />} />
                 <Route path="loans/:id" element={<LoanDetail />} />
                 <Route path="whatsapp" element={<WhatsAppPanel />} />
+                <Route path="vehicles" element={<VehicleInventory />} />
                 <Route path="customers" element={<Customers />} />
                 <Route path="reports" element={<Reports />} />
                 <Route path="admin" element={<AdminConfig />} />

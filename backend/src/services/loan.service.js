@@ -326,4 +326,253 @@ async function listLoans(orgId, { status, customerId, assignedStaffId, page = 1,
     return { loans: enriched, total, page, limit, totalPages: Math.ceil(total / limit) };
 }
 
-module.exports = { generateSchedule, createLoan, getLoanById, listLoans };
+/**
+ * Calculate foreclosure quote.
+ */
+async function calculateForeclosureQuote(orgId, loanId, foreclosureRate) {
+    const loan = await prisma.loan.findFirst({
+        where: { id: loanId, orgId },
+        include: { loanDues: true }
+    });
+    if (!loan) throw new Error('Loan not found');
+
+    const start = new Date(loan.startDate);
+    const now = new Date();
+    let elapsedMonths = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+    if (now.getDate() > start.getDate()) {
+        elapsedMonths += 1;
+    }
+    elapsedMonths = Math.max(1, elapsedMonths);
+    elapsedMonths = Math.min(loan.tenureMonths, elapsedMonths);
+
+    const P = Number(loan.principalAmount);
+    const rNew = Number(foreclosureRate);
+    const rOrig = Number(loan.monthlyInterestRate);
+
+    const monthlyInterestNew = roundHalfUp(P * rNew);
+    const totalInterestNew = roundHalfUp(monthlyInterestNew * elapsedMonths);
+
+    const monthlyInterestOrig = Number(loan.monthlyInterestAmount);
+    const totalInterestOrig = roundHalfUp(monthlyInterestOrig * elapsedMonths);
+
+    // Get total penalties accrued
+    const totalPenaltiesObj = await prisma.penalty.aggregate({
+        where: { loanDue: { loanId } },
+        _sum: { penaltyAmount: true }
+    });
+    const totalPenalties = Number(totalPenaltiesObj._sum.penaltyAmount || 0);
+
+    // Get total paid so far
+    const totalPaidObj = await prisma.payment.aggregate({
+        where: { loanId },
+        _sum: { amount: true }
+    });
+    const totalPaid = Number(totalPaidObj._sum.amount || 0);
+
+    const totalLiability = roundHalfUp(P + totalInterestNew + totalPenalties);
+    const foreclosureAmount = Math.max(0, roundHalfUp(totalLiability - totalPaid));
+
+    return {
+        principal: P,
+        elapsedMonths,
+        originalRate: rOrig,
+        newRate: rNew,
+        originalInterestAccrued: totalInterestOrig,
+        newInterestAccrued: totalInterestNew,
+        interestDifference: roundHalfUp(totalInterestNew - totalInterestOrig),
+        totalPenalties,
+        totalPaid,
+        totalLiability,
+        foreclosureAmount
+    };
+}
+
+/**
+ * Execute foreclosure transaction.
+ */
+async function executeForeclosure(orgId, loanId, { foreclosureRate, paymentMethod, referenceNumber, createdBy, paymentDate }) {
+    const quote = await calculateForeclosureQuote(orgId, loanId, foreclosureRate);
+    const amount = quote.foreclosureAmount;
+
+    return prisma.$transaction(async (tx) => {
+        // 1. Delete future dues
+        await tx.loanDue.deleteMany({
+            where: {
+                loanId,
+                dueSequence: { gt: quote.elapsedMonths }
+            }
+        });
+
+        // 2. Adjust remaining dues
+        const dues = await tx.loanDue.findMany({
+            where: { loanId },
+            orderBy: { dueSequence: 'asc' }
+        });
+
+        const P = Number(quote.principal);
+        const monthlyPrincipal = roundHalfUp(P / quote.elapsedMonths);
+        const rNew = Number(foreclosureRate);
+        const monthlyInterestNew = roundHalfUp(P * rNew);
+
+        for (const due of dues) {
+            let principalDue;
+            if (due.dueSequence < quote.elapsedMonths) {
+                principalDue = monthlyPrincipal;
+            } else {
+                principalDue = roundHalfUp(P - monthlyPrincipal * (quote.elapsedMonths - 1));
+            }
+            const interestDue = monthlyInterestNew;
+            const penaltyDue = Number(due.penaltyDue);
+            const totalDue = roundHalfUp(principalDue + interestDue + penaltyDue);
+
+            await tx.loanDue.update({
+                where: { id: due.id },
+                data: {
+                    principalDue,
+                    interestDue,
+                    totalDue
+                }
+            });
+        }
+
+        // 3. Record foreclosure payment if amount > 0
+        let paymentResult = null;
+        if (amount > 0) {
+            const allocationDetails = [];
+            let remaining = amount;
+
+            const updatedDues = await tx.loanDue.findMany({
+                where: { loanId },
+                orderBy: { dueSequence: 'asc' }
+            });
+
+            for (const due of updatedDues) {
+                if (remaining <= 0) break;
+                const dueRemaining = roundHalfUp(Number(due.totalDue) - Number(due.amountPaid));
+                if (dueRemaining <= 0) continue;
+
+                const allocation = {
+                    loanDueId: due.id,
+                    dueSequence: due.dueSequence,
+                    penalty: 0,
+                    interest: 0,
+                    principal: 0,
+                    total: 0,
+                };
+
+                if (remaining >= dueRemaining) {
+                    allocation.total = dueRemaining;
+
+                    let leftover = dueRemaining;
+                    const penaltyRemaining = roundHalfUp(Number(due.penaltyDue) - Math.max(0, Number(due.amountPaid) - Number(due.principalDue) - Number(due.interestDue)));
+                    const penaltyAlloc = Math.min(leftover, Math.max(0, penaltyRemaining));
+                    allocation.penalty = roundHalfUp(penaltyAlloc);
+                    leftover -= penaltyAlloc;
+
+                    const interestAlloc = Math.min(leftover, Number(due.interestDue));
+                    allocation.interest = roundHalfUp(interestAlloc);
+                    leftover -= interestAlloc;
+
+                    allocation.principal = roundHalfUp(leftover);
+
+                    await tx.loanDue.update({
+                        where: { id: due.id },
+                        data: {
+                            amountPaid: Number(due.totalDue),
+                            status: 'paid'
+                        }
+                    });
+
+                    remaining = roundHalfUp(remaining - dueRemaining);
+                } else {
+                    allocation.total = roundHalfUp(remaining);
+
+                    let leftover = remaining;
+                    const penaltyUnpaid = roundHalfUp(Math.max(0, Number(due.penaltyDue)));
+                    const penaltyAlloc = Math.min(leftover, penaltyUnpaid);
+                    allocation.penalty = roundHalfUp(penaltyAlloc);
+                    leftover = roundHalfUp(leftover - penaltyAlloc);
+
+                    const interestUnpaid = Number(due.interestDue);
+                    const interestAlloc = Math.min(leftover, interestUnpaid);
+                    allocation.interest = roundHalfUp(interestAlloc);
+                    leftover = roundHalfUp(leftover - interestAlloc);
+
+                    allocation.principal = roundHalfUp(leftover);
+
+                    await tx.loanDue.update({
+                        where: { id: due.id },
+                        data: {
+                            amountPaid: roundHalfUp(Number(due.amountPaid) + remaining),
+                            status: 'pending'
+                        }
+                    });
+
+                    remaining = 0;
+                }
+                allocationDetails.push(allocation);
+            }
+
+            const paymentId = uuidv4();
+            const payment = await tx.payment.create({
+                data: {
+                    id: paymentId,
+                    orgId,
+                    loanId,
+                    amount,
+                    paymentMethod,
+                    referenceNumber,
+                    allocationDetails: allocationDetails,
+                    createdBy,
+                    paymentDate: paymentDate ? new Date(paymentDate) : new Date()
+                }
+            });
+
+            const receiptNumber = `RCP-${Date.now()}-${paymentId.slice(0, 8).toUpperCase()}`;
+            await tx.receipt.create({
+                data: {
+                    id: uuidv4(),
+                    orgId,
+                    paymentId,
+                    receiptNumber
+                }
+            });
+
+            paymentResult = payment;
+        } else {
+            await tx.loanDue.updateMany({
+                where: { loanId },
+                data: { status: 'paid' }
+            });
+        }
+
+        // 4. Close the loan
+        const loan = await tx.loan.update({
+            where: { id: loanId },
+            data: {
+                tenureMonths: quote.elapsedMonths,
+                monthlyInterestRate: quote.newRate,
+                monthlyInterestAmount: roundHalfUp(P * quote.newRate),
+                monthlyPrincipalAmount: roundHalfUp(P / quote.elapsedMonths),
+                monthlyDueAmount: roundHalfUp(roundHalfUp(P / quote.elapsedMonths) + roundHalfUp(P * quote.newRate)),
+                outstandingPrincipal: 0,
+                status: 'closed'
+            }
+        });
+
+        // Audit log in transaction context
+        await logAudit({
+            orgId,
+            userId: createdBy,
+            action: 'loan_foreclosed',
+            entityType: 'loan',
+            entityId: loanId,
+            details: { quote, amount }
+        });
+
+        return { loan, payment: paymentResult };
+    });
+}
+
+module.exports = { generateSchedule, createLoan, getLoanById, listLoans, calculateForeclosureQuote, executeForeclosure };
+

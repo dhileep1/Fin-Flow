@@ -23,6 +23,7 @@ const API_PREFIX = '/api/v1/:orgId';
 app.use(`${API_PREFIX}/auth`, require('./routes/auth.routes'));
 app.use(`${API_PREFIX}/customers`, require('./routes/customer.routes'));
 app.use(`${API_PREFIX}/vehicles`, require('./routes/vehicle.routes'));
+app.use(`${API_PREFIX}/seizures`, require('./routes/seizure.routes'));
 app.use(`${API_PREFIX}/loans`, require('./routes/loan.routes'));
 app.use(`${API_PREFIX}/payments`, require('./routes/payment.routes'));
 app.use(`${API_PREFIX}/expenses`, require('./routes/expense.routes'));

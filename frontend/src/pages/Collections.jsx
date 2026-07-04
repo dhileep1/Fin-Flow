@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import api from '../api/client';
-import { Wallet, Calendar, User, Search, ChevronLeft, ChevronRight, Hash, TrendingUp, Landmark, Receipt, ArrowDownCircle, PlusCircle, X } from 'lucide-react';
+import { Wallet, Calendar, User, Search, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Hash, TrendingUp, Landmark, Receipt, ArrowDownCircle, PlusCircle, X } from 'lucide-react';
 
 const PAGE_SIZE = 10;
 
@@ -33,13 +33,24 @@ export default function Collections() {
     const [loading, setLoading] = useState(true);
     
     // Tab and filter states
-    const [activeTab, setActiveTab] = useState('payments'); // 'payments' | 'docCharges' | 'expenses'
+    const [activeTab, setActiveTab] = useState('all'); // 'all' | 'payments' | 'docCharges' | 'expenses'
     const [dateFilter, setDateFilter] = useState('month'); // 'all' | 'today' | 'week' | 'month' | 'custom'
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
+    const [expandedDates, setExpandedDates] = useState({});
+    const [openingCashInHand, setOpeningCashInHand] = useState(() => {
+        const saved = localStorage.getItem('openingCashInHand');
+        return saved ? Number(saved) : 1000000;
+    });
+
+    const handleOpeningCashChange = (val) => {
+        setOpeningCashInHand(val);
+        localStorage.setItem('openingCashInHand', val);
+    };
     
     // Pagination states
+    const [allPage, setAllPage] = useState(1);
     const [paymentPage, setPaymentPage] = useState(1);
     const [loanPage, setLoanPage] = useState(1);
     const [expensePage, setExpensePage] = useState(1);
@@ -269,6 +280,254 @@ export default function Collections() {
         });
     }, [dateFilteredExpenses, searchQuery]);
 
+    // Helper to get local YYYY-MM-DD
+    const getLocalDateString = (dateVal) => {
+        if (!dateVal) return '';
+        try {
+            const d = new Date(dateVal);
+            if (isNaN(d.getTime())) return '';
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        } catch {
+            return '';
+        }
+    };
+
+    // Group all transactions chronologically to calculate true running balance
+    const allDateGroups = useMemo(() => {
+        const groups = {};
+
+        payments.forEach(p => {
+            const dateStr = getLocalDateString(p.paymentDate);
+            if (!dateStr) return;
+            if (!groups[dateStr]) {
+                groups[dateStr] = {
+                    date: dateStr,
+                    payments: [],
+                    loans: [],
+                    expenses: [],
+                    collection: 0,
+                    docCharges: 0,
+                    expensesAmt: 0,
+                    given: 0,
+                    inflow: 0,
+                    outflow: 0,
+                    tally: 0
+                };
+            }
+            groups[dateStr].payments.push(p);
+            groups[dateStr].collection += Number(p.amount || 0);
+        });
+
+        loans.forEach(l => {
+            const dateStr = getLocalDateString(l.startDate);
+            if (!dateStr) return;
+            if (!groups[dateStr]) {
+                groups[dateStr] = {
+                    date: dateStr,
+                    payments: [],
+                    loans: [],
+                    expenses: [],
+                    collection: 0,
+                    docCharges: 0,
+                    expensesAmt: 0,
+                    given: 0,
+                    inflow: 0,
+                    outflow: 0,
+                    tally: 0
+                };
+            }
+            groups[dateStr].loans.push(l);
+            groups[dateStr].docCharges += Number(l.documentFee || 0);
+            groups[dateStr].given += Number(l.principalAmount || 0);
+        });
+
+        expenses.forEach(e => {
+            const dateStr = getLocalDateString(e.expenseDate);
+            if (!dateStr) return;
+            if (!groups[dateStr]) {
+                groups[dateStr] = {
+                    date: dateStr,
+                    payments: [],
+                    loans: [],
+                    expenses: [],
+                    collection: 0,
+                    docCharges: 0,
+                    expensesAmt: 0,
+                    given: 0,
+                    inflow: 0,
+                    outflow: 0,
+                    tally: 0
+                };
+            }
+            groups[dateStr].expenses.push(e);
+            groups[dateStr].expensesAmt += Number(e.amount || 0);
+        });
+
+        Object.values(groups).forEach(g => {
+            g.inflow = g.collection + g.docCharges;
+            g.outflow = g.expensesAmt + g.given;
+            g.tally = g.inflow - g.outflow;
+        });
+
+        // Sort ascending chronologically to compute running balance
+        const sorted = Object.values(groups).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+        let running = Number(openingCashInHand || 0);
+        sorted.forEach(g => {
+            g.openingBalance = running;
+            g.closingBalance = running + g.tally;
+            running = g.closingBalance;
+        });
+
+        // Return descending (newest first)
+        return sorted.reverse();
+    }, [payments, loans, expenses, openingCashInHand]);
+
+    // Apply date and search filters to date groups for display
+    const filteredDateGroups = useMemo(() => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        let list = allDateGroups.filter(g => {
+            const gDate = new Date(g.date);
+            if (isNaN(gDate.getTime())) return false;
+
+            if (dateFilter === 'today') {
+                const start = new Date(today);
+                const end = new Date(today);
+                end.setHours(23, 59, 59, 999);
+                return gDate >= start && gDate <= end;
+            }
+            if (dateFilter === 'week') {
+                const start = new Date(today);
+                start.setDate(today.getDate() - 7);
+                const end = new Date(today);
+                end.setHours(23, 59, 59, 999);
+                return gDate >= start && gDate <= end;
+            }
+            if (dateFilter === 'month') {
+                const start = new Date(today.getFullYear(), today.getMonth(), 1);
+                const end = new Date(today);
+                end.setHours(23, 59, 59, 999);
+                return gDate >= start && gDate <= end;
+            }
+            if (dateFilter === 'custom') {
+                if (!customFrom || !customTo) return true;
+                const start = new Date(customFrom);
+                start.setHours(0, 0, 0, 0);
+                const end = new Date(customTo);
+                end.setHours(23, 59, 59, 999);
+                return gDate >= start && gDate <= end;
+            }
+            return true;
+        });
+
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            list = list.map(g => {
+                const paymentsMatch = g.payments.filter(p => {
+                    const customerName = p.loan?.customer?.name?.toLowerCase() || '';
+                    const loanNo = p.loanId?.slice(0, 8).toLowerCase() || '';
+                    const creatorName = p.creator?.name?.toLowerCase() || '';
+                    const billNo = p.receipts?.[0]?.receiptNumber?.toLowerCase() || '';
+                    return customerName.includes(q) || loanNo.includes(q) || creatorName.includes(q) || billNo.includes(q);
+                });
+                const loansMatch = g.loans.filter(l => {
+                    const customerName = l.customer?.name?.toLowerCase() || '';
+                    const loanNo = l.id?.slice(0, 8).toLowerCase() || '';
+                    return customerName.includes(q) || loanNo.includes(q);
+                });
+                const expensesMatch = g.expenses.filter(e => {
+                    const category = e.category?.toLowerCase() || '';
+                    const desc = e.description?.toLowerCase() || '';
+                    const creatorName = e.creator?.name?.toLowerCase() || '';
+                    const matchesTag = e.tags?.some(t => t.toLowerCase().includes(q)) || false;
+                    return category.includes(q) || desc.includes(q) || creatorName.includes(q) || matchesTag;
+                });
+
+                if (paymentsMatch.length > 0 || loansMatch.length > 0 || expensesMatch.length > 0) {
+                    return {
+                        ...g,
+                        payments: paymentsMatch,
+                        loans: loansMatch,
+                        expenses: expensesMatch
+                    };
+                }
+                return null;
+            }).filter(Boolean);
+        }
+
+        return list;
+    }, [allDateGroups, dateFilter, customFrom, customTo, searchQuery]);
+
+    const getDetailedTxListForDate = (group) => {
+        const list = [];
+        group.payments.forEach(p => {
+            list.push({
+                id: `p-${p.id}`,
+                time: p.paymentDate ? new Date(p.paymentDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—',
+                type: 'Payment Received',
+                typeClass: 'border-emerald-500 text-emerald-700 bg-emerald-50',
+                title: 'EMI Payment',
+                details: `Bill #${p.receipts?.[0]?.receiptNumber || '—'} (Loan #${p.loanId?.slice(0, 8).toUpperCase()})`,
+                customer: p.loan?.customer?.name || '—',
+                inflow: Number(p.amount),
+                outflow: 0,
+                creator: p.creator?.name || 'System'
+            });
+        });
+        group.loans.forEach(l => {
+            list.push({
+                id: `l-doc-${l.id}`,
+                time: l.startDate ? new Date(l.startDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—',
+                type: 'Doc Charge',
+                typeClass: 'border-blue-500 text-blue-700 bg-blue-50',
+                title: 'Document Fee',
+                details: `Doc Fee (Loan #${l.id?.slice(0, 8).toUpperCase()})`,
+                customer: l.customer?.name || '—',
+                inflow: Number(l.documentFee),
+                outflow: 0,
+                creator: l.assignedStaff?.name || 'Admin'
+            });
+            list.push({
+                id: `l-principal-${l.id}`,
+                time: l.startDate ? new Date(l.startDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—',
+                type: 'Loan Disbursed',
+                typeClass: 'border-amber-500 text-amber-700 bg-amber-50',
+                title: 'Loan Disbursed',
+                details: `Principal Disbursed (Loan #${l.id?.slice(0, 8).toUpperCase()})`,
+                customer: l.customer?.name || '—',
+                inflow: 0,
+                outflow: Number(l.principalAmount),
+                creator: l.assignedStaff?.name || 'Admin'
+            });
+        });
+        group.expenses.forEach(e => {
+            list.push({
+                id: `e-${e.id}`,
+                time: e.expenseDate ? new Date(e.expenseDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—',
+                type: 'Expense',
+                typeClass: 'border-red-500 text-red-700 bg-red-50',
+                title: `Expense: ${e.category}`,
+                details: e.description || '—',
+                customer: '—',
+                inflow: 0,
+                outflow: Number(e.amount),
+                creator: e.creator?.name || 'System'
+            });
+        });
+        return list.sort((a, b) => b.inflow - a.inflow || b.outflow - a.outflow);
+    };
+
+    // Paginate filtered all transactions (date groups)
+    const pagedDateGroups = useMemo(() => {
+        const start = (allPage - 1) * PAGE_SIZE;
+        return filteredDateGroups.slice(start, start + PAGE_SIZE);
+    }, [filteredDateGroups, allPage]);
+
     // Paginate filtered payments
     const pagedPayments = useMemo(() => {
         const start = (paymentPage - 1) * PAGE_SIZE;
@@ -287,12 +546,24 @@ export default function Collections() {
         return filteredExpenses.slice(start, start + PAGE_SIZE);
     }, [filteredExpenses, expensePage]);
 
+    const totalAllPages = Math.max(1, Math.ceil(filteredDateGroups.length / PAGE_SIZE));
     const totalPaymentPages = Math.max(1, Math.ceil(filteredPayments.length / PAGE_SIZE));
     const totalLoanPages = Math.max(1, Math.ceil(filteredLoans.length / PAGE_SIZE));
     const totalExpensePages = Math.max(1, Math.ceil(filteredExpenses.length / PAGE_SIZE));
 
-    const startIdx = (paymentPage - 1) * PAGE_SIZE + 1;
-    const endIdx = Math.min(paymentPage * PAGE_SIZE, filteredPayments.length);
+    const startIdx = useMemo(() => {
+        if (activeTab === 'all') return (allPage - 1) * PAGE_SIZE + 1;
+        if (activeTab === 'payments') return (paymentPage - 1) * PAGE_SIZE + 1;
+        if (activeTab === 'docCharges') return (loanPage - 1) * PAGE_SIZE + 1;
+        return (expensePage - 1) * PAGE_SIZE + 1;
+    }, [activeTab, allPage, paymentPage, loanPage, expensePage]);
+
+    const endIdx = useMemo(() => {
+        if (activeTab === 'all') return Math.min(allPage * PAGE_SIZE, filteredDateGroups.length);
+        if (activeTab === 'payments') return Math.min(paymentPage * PAGE_SIZE, filteredPayments.length);
+        if (activeTab === 'docCharges') return Math.min(loanPage * PAGE_SIZE, filteredLoans.length);
+        return Math.min(expensePage * PAGE_SIZE, filteredExpenses.length);
+    }, [activeTab, allPage, paymentPage, loanPage, expensePage, filteredDateGroups, filteredPayments, filteredLoans, filteredExpenses]);
 
     // Calculate sum of principal and interest from allocationDetails
     const getBreakdown = (payment) => {
@@ -382,6 +653,16 @@ export default function Collections() {
             {/* Tab Toggles */}
             <div className="cmd-table-tabs" style={{ marginBottom: 'var(--space-4)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div className="cmd-tab-group" role="tablist">
+                    <button
+                        role="tab"
+                        aria-selected={activeTab === 'all'}
+                        className={`cmd-tab ${activeTab === 'all' ? 'cmd-tab--active' : ''}`}
+                        onClick={() => setActiveTab('all')}
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                    >
+                        <Landmark size={16} />
+                        All Transactions
+                    </button>
                     <button
                         role="tab"
                         aria-selected={activeTab === 'payments'}
@@ -500,6 +781,7 @@ export default function Collections() {
                                 value={searchQuery}
                                 onChange={(e) => {
                                     setSearchQuery(e.target.value);
+                                    setAllPage(1);
                                     setPaymentPage(1);
                                     setLoanPage(1);
                                     setExpensePage(1);
@@ -521,6 +803,7 @@ export default function Collections() {
                                     className={`quick-date-btn ${dateFilter === b.key ? 'active' : ''}`}
                                     onClick={() => {
                                         setDateFilter(b.key);
+                                        setAllPage(1);
                                         setPaymentPage(1);
                                         setLoanPage(1);
                                         setExpensePage(1);
@@ -550,6 +833,7 @@ export default function Collections() {
                                     value={customFrom}
                                     onChange={(e) => {
                                         setCustomFrom(e.target.value);
+                                        setAllPage(1);
                                         setPaymentPage(1);
                                         setLoanPage(1);
                                         setExpensePage(1);
@@ -565,6 +849,7 @@ export default function Collections() {
                                     value={customTo}
                                     onChange={(e) => {
                                         setCustomTo(e.target.value);
+                                        setAllPage(1);
                                         setPaymentPage(1);
                                         setLoanPage(1);
                                         setExpensePage(1);
@@ -574,106 +859,411 @@ export default function Collections() {
                             </div>
                         </div>
                     )}
+                    {/* Opening Cash Input */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'flex-start', borderTop: '1px dashed #e2e8f0', paddingTop: '12px', marginTop: '4px', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>Opening Cash in Hand:</span>
+                            <div style={{ position: 'relative', display: 'inline-block' }}>
+                                <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '13px', color: '#64748b', fontWeight: 500 }}>₹</span>
+                                <input
+                                    type="number"
+                                    className="form-input"
+                                    value={openingCashInHand}
+                                    onChange={(e) => handleOpeningCashChange(Number(e.target.value))}
+                                    style={{
+                                        paddingLeft: '24px',
+                                        width: '180px',
+                                        height: '34px',
+                                        borderRadius: '8px',
+                                        fontSize: '13px',
+                                        border: '1px solid #cbd5e1',
+                                        outline: 'none',
+                                        fontWeight: 600,
+                                        color: '#0f172a'
+                                    }}
+                                />
+                            </div>
+                        </div>
+                        <span style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>
+                            * This starting balance is used to compute daily opening and closing running cash levels in the ledger.
+                        </span>
+                    </div>
                 </div>
             </div>
 
             {/* Summary Cards */}
-            {activeTab !== 'expenses' && (
-                <div className="cmd-grid-3" style={{ marginBottom: 'var(--space-6)' }}>
-                    {activeTab === 'payments' ? (
-                        <>
-                            <div className="progress-card">
-                                <div className="progress-card__icon-circle progress-card__icon-circle--emerald">
-                                    <Wallet size={24} />
-                                </div>
-                                <div className="progress-card__body">
-                                    <span className="progress-card__title">Total Collected</span>
-                                    <div className="progress-card__values">
-                                        <span className="progress-card__actual" style={{ color: 'var(--color-success)' }}>
-                                            {fmt(totals.totalAmount)}
-                                        </span>
-                                    </div>
+            <div className="cmd-grid-3" style={{ marginBottom: 'var(--space-6)' }}>
+                {activeTab === 'all' ? (
+                    <>
+                        <div className="progress-card">
+                            <div className="progress-card__icon-circle progress-card__icon-circle--emerald">
+                                <Wallet size={24} />
+                            </div>
+                            <div className="progress-card__body">
+                                <span className="progress-card__title">Total Inflow</span>
+                                <div className="progress-card__values">
+                                    <span className="progress-card__actual" style={{ color: 'var(--color-success)' }}>
+                                        {fmt(totals.totalAmount + totals.totalDocCharges)}
+                                    </span>
                                 </div>
                             </div>
+                        </div>
 
-                            <div className="progress-card">
-                                <div className="progress-card__icon-circle progress-card__icon-circle--blue">
-                                    <TrendingUp size={24} />
-                                </div>
-                                <div className="progress-card__body">
-                                    <span className="progress-card__title">Principal Portion</span>
-                                    <div className="progress-card__values">
-                                        <span className="progress-card__actual" style={{ color: 'var(--slate-900)' }}>
-                                            {fmt(totals.totalPrincipal)}
-                                        </span>
-                                    </div>
+                        <div className="progress-card">
+                            <div className="progress-card__icon-circle progress-card__icon-circle--rose" style={{ background: '#fef2f2', color: '#ef4444' }}>
+                                <ArrowDownCircle size={24} />
+                            </div>
+                            <div className="progress-card__body">
+                                <span className="progress-card__title">Total Outflow</span>
+                                <div className="progress-card__values">
+                                    <span className="progress-card__actual" style={{ color: '#ef4444' }}>
+                                        {fmt(totals.totalExpenseAmt + totals.totalLoanAmount)}
+                                    </span>
                                 </div>
                             </div>
+                        </div>
 
-                            <div className="progress-card">
-                                <div className="progress-card__icon-circle progress-card__icon-circle--amber">
-                                    <TrendingUp size={24} />
-                                </div>
-                                <div className="progress-card__body">
-                                    <span className="progress-card__title">Interest Portion</span>
-                                    <div className="progress-card__values">
-                                        <span className="progress-card__actual" style={{ color: 'var(--color-warning)' }}>
-                                            {fmt(totals.totalInterest)}
-                                        </span>
-                                    </div>
+                        <div className="progress-card">
+                            {(() => {
+                                const netFlow = (totals.totalAmount + totals.totalDocCharges) - (totals.totalExpenseAmt + totals.totalLoanAmount);
+                                const isPositive = netFlow >= 0;
+                                return (
+                                    <>
+                                        <div className={`progress-card__icon-circle ${isPositive ? 'progress-card__icon-circle--emerald' : 'progress-card__icon-circle--rose'}`} style={!isPositive ? { background: '#fef2f2', color: '#ef4444' } : undefined}>
+                                            <Landmark size={24} />
+                                        </div>
+                                        <div className="progress-card__body">
+                                            <span className="progress-card__title">Net Cash Flow</span>
+                                            <div className="progress-card__values">
+                                                <span className="progress-card__actual" style={{ color: isPositive ? 'var(--color-success)' : '#ef4444' }}>
+                                                    {fmt(netFlow)}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </>
+                                );
+                            })()}
+                        </div>
+                    </>
+                ) : activeTab === 'payments' ? (
+                    <>
+                        <div className="progress-card">
+                            <div className="progress-card__icon-circle progress-card__icon-circle--emerald">
+                                <Wallet size={24} />
+                            </div>
+                            <div className="progress-card__body">
+                                <span className="progress-card__title">Total Collected</span>
+                                <div className="progress-card__values">
+                                    <span className="progress-card__actual" style={{ color: 'var(--color-success)' }}>
+                                        {fmt(totals.totalAmount)}
+                                    </span>
                                 </div>
                             </div>
-                        </>
-                    ) : (
-                        <>
-                            <div className="progress-card">
-                                <div className="progress-card__icon-circle progress-card__icon-circle--emerald">
-                                    <Receipt size={24} />
-                                </div>
-                                <div className="progress-card__body">
-                                    <span className="progress-card__title">Document Charges Collected</span>
-                                    <div className="progress-card__values">
-                                        <span className="progress-card__actual" style={{ color: 'var(--color-success)' }}>
-                                            {fmt(totals.totalDocCharges)}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
+                        </div>
 
-                            <div className="progress-card">
-                                <div className="progress-card__icon-circle progress-card__icon-circle--blue">
-                                    <Landmark size={24} />
-                                </div>
-                                <div className="progress-card__body">
-                                    <span className="progress-card__title">Total Loans Issued</span>
-                                    <div className="progress-card__values">
-                                        <span className="progress-card__actual" style={{ color: 'var(--slate-900)' }}>
-                                            {fmt(totals.totalLoanAmount)}
-                                        </span>
-                                    </div>
+                        <div className="progress-card">
+                            <div className="progress-card__icon-circle progress-card__icon-circle--blue">
+                                <TrendingUp size={24} />
+                            </div>
+                            <div className="progress-card__body">
+                                <span className="progress-card__title">Principal Portion</span>
+                                <div className="progress-card__values">
+                                    <span className="progress-card__actual" style={{ color: 'var(--slate-900)' }}>
+                                        {fmt(totals.totalPrincipal)}
+                                    </span>
                                 </div>
                             </div>
+                        </div>
 
-                            <div className="progress-card">
-                                <div className="progress-card__icon-circle progress-card__icon-circle--slate">
-                                    <Hash size={24} />
-                                </div>
-                                <div className="progress-card__body">
-                                    <span className="progress-card__title">Total Loans Count</span>
-                                    <div className="progress-card__values">
-                                        <span className="progress-card__actual" style={{ color: 'var(--slate-700)' }}>
-                                            {filteredLoans.length} Loans
-                                        </span>
-                                    </div>
+                        <div className="progress-card">
+                            <div className="progress-card__icon-circle progress-card__icon-circle--amber">
+                                <TrendingUp size={24} />
+                            </div>
+                            <div className="progress-card__body">
+                                <span className="progress-card__title">Interest Portion</span>
+                                <div className="progress-card__values">
+                                    <span className="progress-card__actual" style={{ color: 'var(--color-warning)' }}>
+                                        {fmt(totals.totalInterest)}
+                                    </span>
                                 </div>
                             </div>
-                        </>
-                    )}
-                </div>
-            )}
+                        </div>
+                    </>
+                ) : activeTab === 'docCharges' ? (
+                    <>
+                        <div className="progress-card">
+                            <div className="progress-card__icon-circle progress-card__icon-circle--emerald">
+                                <Receipt size={24} />
+                            </div>
+                            <div className="progress-card__body">
+                                <span className="progress-card__title">Document Charges Collected</span>
+                                <div className="progress-card__values">
+                                    <span className="progress-card__actual" style={{ color: 'var(--color-success)' }}>
+                                        {fmt(totals.totalDocCharges)}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="progress-card">
+                            <div className="progress-card__icon-circle progress-card__icon-circle--blue">
+                                <Landmark size={24} />
+                            </div>
+                            <div className="progress-card__body">
+                                <span className="progress-card__title">Total Loans Issued</span>
+                                <div className="progress-card__values">
+                                    <span className="progress-card__actual" style={{ color: 'var(--slate-900)' }}>
+                                        {fmt(totals.totalLoanAmount)}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="progress-card">
+                            <div className="progress-card__icon-circle progress-card__icon-circle--slate">
+                                <Hash size={24} />
+                            </div>
+                            <div className="progress-card__body">
+                                <span className="progress-card__title">Total Loans Count</span>
+                                <div className="progress-card__values">
+                                    <span className="progress-card__actual" style={{ color: 'var(--slate-700)' }}>
+                                        {filteredLoans.length} Loans
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <div className="progress-card">
+                            <div className="progress-card__icon-circle progress-card__icon-circle--rose" style={{ background: '#fef2f2', color: '#ef4444' }}>
+                                <ArrowDownCircle size={24} />
+                            </div>
+                            <div className="progress-card__body">
+                                <span className="progress-card__title">Total Expenses</span>
+                                <div className="progress-card__values">
+                                    <span className="progress-card__actual" style={{ color: '#ef4444' }}>
+                                        {fmt(totals.totalExpenseAmt)}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="progress-card">
+                            <div className="progress-card__icon-circle progress-card__icon-circle--blue">
+                                <Landmark size={24} />
+                            </div>
+                            <div className="progress-card__body">
+                                <span className="progress-card__title">Rent Expenses</span>
+                                <div className="progress-card__values">
+                                    <span className="progress-card__actual" style={{ color: 'var(--slate-900)' }}>
+                                        {fmt(totals.totalRentAmt)}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="progress-card">
+                            <div className="progress-card__icon-circle progress-card__icon-circle--amber">
+                                <User size={24} />
+                            </div>
+                            <div className="progress-card__body">
+                                <span className="progress-card__title">Salary Paid</span>
+                                <div className="progress-card__values">
+                                    <span className="progress-card__actual" style={{ color: 'var(--slate-900)' }}>
+                                        {fmt(totals.totalSalaryAmt)}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </>
+                )}
+            </div>
 
             {/* Content Tables */}
-            {activeTab === 'payments' ? (
+            {activeTab === 'all' ? (
+                <div className="card p-0" style={{ overflow: 'hidden', border: '1px solid var(--slate-200)' }}>
+                    <div className="table-container p-0 border-0 shadow-none">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                                    <th className="px-4 py-4 text-center" style={{ width: '60px' }}></th>
+                                    <th className="px-6 py-4 text-left">Date</th>
+                                    <th className="px-6 py-4 text-right">Opening Cash</th>
+                                    <th className="px-6 py-4 text-right" style={{ backgroundColor: '#ecfdf5', color: '#047857' }}>Collection (+)</th>
+                                    <th className="px-6 py-4 text-right" style={{ backgroundColor: '#ecfdf5', color: '#047857' }}>Doc Charges (+)</th>
+                                    <th className="px-6 py-4 text-right" style={{ backgroundColor: '#fef2f2', color: '#b91c1c' }}>Expenses (-)</th>
+                                    <th className="px-6 py-4 text-right" style={{ backgroundColor: '#fef2f2', color: '#b91c1c' }}>Total Given (-)</th>
+                                    <th className="px-6 py-4 text-right" style={{ backgroundColor: '#d1fae5', color: '#064e3b' }}>Daily Inflow (+)</th>
+                                    <th className="px-6 py-4 text-right" style={{ backgroundColor: '#fee2e2', color: '#7f1d1d' }}>Daily Outflow (-)</th>
+                                    <th className="px-6 py-4 text-right">Daily Tally</th>
+                                    <th className="px-6 py-4 text-right">Closing Cash</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {pagedDateGroups.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={11}>
+                                            <div className="empty-state-inline" style={{ padding: 'var(--space-8) 0' }}>
+                                                <div className="empty-icon" style={{ display: 'inline-flex', padding: '12px', background: 'var(--slate-100)', borderRadius: '50%', color: 'var(--slate-400)', marginBottom: '12px' }}>
+                                                    <Landmark size={24} />
+                                                </div>
+                                                <div className="empty-title" style={{ fontWeight: 600, color: 'var(--slate-800)', fontSize: '15px' }}>No transactions found</div>
+                                                <div className="empty-desc" style={{ color: 'var(--slate-500)', fontSize: '13px' }}>
+                                                    No transactions recorded for this selected criteria.
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    pagedDateGroups.map((g) => {
+                                        const isExpanded = !!expandedDates[g.date];
+                                        return (
+                                            <React.Fragment key={g.date}>
+                                                <tr className="hover-table-row font-medium">
+                                                    <td className="px-4 py-4 text-center">
+                                                        <button 
+                                                            onClick={() => setExpandedDates(prev => ({ ...prev, [g.date]: !isExpanded }))}
+                                                            style={{
+                                                                background: '#f1f5f9',
+                                                                border: 'none',
+                                                                padding: '6px',
+                                                                borderRadius: '8px',
+                                                                cursor: 'pointer',
+                                                                color: '#475569',
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                transition: 'all 0.2s'
+                                                            }}
+                                                            className="hover:bg-slate-200"
+                                                        >
+                                                            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                                                        </button>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-left text-slate-900 font-semibold">{formatDate(g.date)}</td>
+                                                    <td className="px-6 py-4 text-right text-slate-500 font-medium">{fmt(g.openingBalance)}</td>
+                                                    <td className="px-6 py-4 text-right text-emerald-600 font-semibold" style={{ backgroundColor: '#ecfdf5' }}>{g.collection > 0 ? fmt(g.collection) : '—'}</td>
+                                                    <td className="px-6 py-4 text-right text-emerald-600 font-semibold" style={{ backgroundColor: '#ecfdf5' }}>{g.docCharges > 0 ? fmt(g.docCharges) : '—'}</td>
+                                                    <td className="px-6 py-4 text-right text-red-500 font-semibold" style={{ backgroundColor: '#fef2f2' }}>{g.expensesAmt > 0 ? fmt(g.expensesAmt) : '—'}</td>
+                                                    <td className="px-6 py-4 text-right text-red-500 font-semibold" style={{ backgroundColor: '#fef2f2' }}>{g.given > 0 ? fmt(g.given) : '—'}</td>
+                                                    <td className="px-6 py-4 text-right text-emerald-900 font-extrabold" style={{ fontSize: '13.5px', backgroundColor: '#d1fae5' }}>{g.inflow > 0 ? fmt(g.inflow) : '—'}</td>
+                                                    <td className="px-6 py-4 text-right text-red-900 font-extrabold" style={{ fontSize: '13.5px', backgroundColor: '#fee2e2' }}>{g.outflow > 0 ? fmt(g.outflow) : '—'}</td>
+                                                    <td className="px-6 py-4 text-right" style={{ fontSize: '13.5px', backgroundColor: g.tally >= 0 ? '#ecfdf5' : '#fef2f2' }}>
+                                                        <span className={g.tally >= 0 ? "text-emerald-950 font-extrabold" : "text-red-950 font-extrabold"}>
+                                                            {g.tally >= 0 ? `+${fmt(g.tally)}` : fmt(g.tally)}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-right text-slate-900 font-bold" style={{ fontSize: '13.5px' }}>{fmt(g.closingBalance)}</td>
+                                                </tr>
+                                                {isExpanded && (
+                                                    <tr className="bg-slate-50/50">
+                                                        <td colSpan={11} className="px-6 py-3">
+                                                            <div className="border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm" style={{ margin: '4px 0 12px 0' }}>
+                                                                <div className="bg-slate-50 px-4 py-2 border-b border-slate-200 flex items-center justify-between">
+                                                                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Transaction Details for {formatDate(g.date)}</span>
+                                                                    <span className="text-[11px] font-semibold text-slate-500">Total Entries: {getDetailedTxListForDate(g).length}</span>
+                                                                </div>
+                                                                <table className="w-full text-xs">
+                                                                    <thead>
+                                                                        <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
+                                                                            <th className="px-4 py-2.5 text-left">Time</th>
+                                                                            <th className="px-4 py-2.5 text-left">Type</th>
+                                                                            <th className="px-4 py-2.5 text-left">Particulars / Details</th>
+                                                                            <th className="px-4 py-2.5 text-left">Customer</th>
+                                                                            <th className="px-4 py-2.5 text-right">Inflow (+)</th>
+                                                                            <th className="px-4 py-2.5 text-right">Outflow (-)</th>
+                                                                            <th className="px-4 py-2.5 text-center">Recorded By</th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody className="divide-y divide-slate-100">
+                                                                        {getDetailedTxListForDate(g).map(dtx => (
+                                                                            <tr key={dtx.id} className="hover:bg-slate-50/50">
+                                                                                <td className="px-4 py-3 text-slate-500 font-medium">{dtx.time}</td>
+                                                                                <td className="px-4 py-3">
+                                                                                    <span className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase border ${dtx.typeClass}`}>
+                                                                                        {dtx.type}
+                                                                                    </span>
+                                                                                </td>
+                                                                                <td className="px-4 py-3 text-slate-700">
+                                                                                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                                                        <span style={{ fontWeight: 600, color: 'var(--slate-900)' }}>{dtx.title}</span>
+                                                                                        <span className="text-[11px] text-slate-400 font-medium">{dtx.details}</span>
+                                                                                    </div>
+                                                                                </td>
+                                                                                <td className="px-4 py-3 text-slate-900 font-semibold">{dtx.customer}</td>
+                                                                                <td className="px-4 py-3 text-right">
+                                                                                    {dtx.inflow > 0 ? (
+                                                                                        <span className="text-emerald-500 font-extrabold">{fmt(dtx.inflow)}</span>
+                                                                                    ) : (
+                                                                                        <span className="text-slate-300 font-mono">—</span>
+                                                                                    )}
+                                                                                </td>
+                                                                                <td className="px-4 py-3 text-right">
+                                                                                    {dtx.outflow > 0 ? (
+                                                                                        <span className="text-red-400 font-extrabold">{fmt(dtx.outflow)}</span>
+                                                                                    ) : (
+                                                                                        <span className="text-slate-300 font-mono">—</span>
+                                                                                    )}
+                                                                                </td>
+                                                                                <td className="px-4 py-3 text-center">
+                                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold">
+                                                                                        {dtx.creator}
+                                                                                    </span>
+                                                                                </td>
+                                                                            </tr>
+                                                                        ))}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
+                                        );
+                                    })
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {filteredDateGroups.length > 0 && (
+                        <div className="table-pagination" style={{ padding: 'var(--space-4) var(--space-6)', borderTop: '1px solid var(--slate-100)' }}>
+                            <div className="pagination-info text-sm text-slate-500 font-medium">
+                                Showing {startIdx} to {endIdx} of {filteredDateGroups.length} entries
+                            </div>
+                            <div className="pagination-btns flex gap-1">
+                                <button
+                                    disabled={allPage === 1}
+                                    onClick={() => setAllPage(allPage - 1)}
+                                    className="btn btn-sm btn-secondary"
+                                    style={{ padding: '4px 10px' }}
+                                >
+                                    <ChevronLeft size={14} /> Prev
+                                </button>
+                                {[...Array(totalAllPages)].map((_, i) => (
+                                    <button
+                                        key={i + 1}
+                                        className={`btn btn-sm ${allPage === i + 1 ? 'btn-primary' : 'btn-secondary'}`}
+                                        onClick={() => setAllPage(i + 1)}
+                                        style={{ minWidth: '32px', padding: '4px' }}
+                                    >
+                                        {i + 1}
+                                    </button>
+                                )).slice(0, 5)}
+                                <button
+                                    disabled={allPage >= totalAllPages}
+                                    onClick={() => setAllPage(allPage + 1)}
+                                    className="btn btn-sm btn-secondary"
+                                    style={{ padding: '4px 10px' }}
+                                >
+                                    Next <ChevronRight size={14} />
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            ) : activeTab === 'payments' ? (
                 <div className="card p-0" style={{ overflow: 'hidden', border: '1px solid var(--slate-200)' }}>
                     <div className="table-container p-0 border-0 shadow-none">
                         <table className="w-full text-sm">

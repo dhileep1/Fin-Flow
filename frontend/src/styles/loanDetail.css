@@ -505,3 +505,46 @@
 @media (max-width: 640px) {
     .health-strip { height: 24px; } /* taller for touch */
 }
+
+/* Action Buttons Header Styles & Hovers */
+.btn-action-seize {
+    color: #ef4444 !important;
+    border: 1px solid #ef4444 !important;
+    background: transparent !important;
+    height: 38px;
+    padding: 0 14px;
+    font-size: 12px;
+    font-weight: bold;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-action-seize:hover {
+    background-color: #ef4444 !important;
+    color: #ffffff !important;
+}
+
+.btn-action-foreclose {
+    color: var(--color-success) !important;
+    border: 1px solid var(--color-success) !important;
+    background: transparent !important;
+    height: 38px;
+    padding: 0 14px;
+    font-size: 12px;
+    font-weight: bold;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-action-foreclose:hover {
+    background-color: var(--color-success) !important;
+    color: #ffffff !important;
+}

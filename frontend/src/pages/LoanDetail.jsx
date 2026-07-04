@@ -3,12 +3,14 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api/client';
 import PaymentModal from '../components/PaymentModal';
 import CallLogModal from '../components/CallLogModal';
-import { 
-    Phone, 
-    Calendar, 
-    Clock, 
-    BarChart3, 
-    FileText, 
+import SeizureModal from '../components/SeizureModal';
+import ForeclosureModal from '../components/ForeclosureModal';
+import {
+    Phone,
+    Calendar,
+    Clock,
+    BarChart3,
+    FileText,
     CreditCard,
     Eye,
     Download,
@@ -29,9 +31,11 @@ export default function LoanDetail() {
     const [loading, setLoading] = useState(true);
     const [showPayment, setShowPayment] = useState(false);
     const [showCallLog, setShowCallLog] = useState(false);
+    const [showSeize, setShowSeize] = useState(false);
+    const [showForeclosure, setShowForeclosure] = useState(false);
     const [activeTab, setActiveTab] = useState('schedule');
     const [expandFuture, setExpandFuture] = useState(false);
-    
+
     // For scrolling to rows
     const scheduleRowsRef = useRef({});
 
@@ -53,7 +57,7 @@ export default function LoanDetail() {
 
     // Strictly enforce terminology
     const normalizeStatus = (s) => (s?.toLowerCase() === 'pending' ? 'overdue' : s?.toLowerCase() || 'upcoming');
-    
+
     const statusBadge = (status) => {
         const norm = normalizeStatus(status);
         const map = { paid: 'badge-success', overdue: 'badge-defaulter', upcoming: 'badge-info', active: 'badge-success' };
@@ -85,15 +89,15 @@ export default function LoanDetail() {
     let oldestMissedDue = null;
 
     // Ordered dues
-    const sortedDues = [...dues].sort((a,b) => a.dueSequence - b.dueSequence);
+    const sortedDues = [...dues].sort((a, b) => a.dueSequence - b.dueSequence);
 
     sortedDues.forEach(d => {
         penaltyAccumulated += Number(d.penaltyDue || 0);
         const dueDate = new Date(d.dueDate);
         dueDate.setHours(0, 0, 0, 0);
-        
+
         const isMissed = d.status === 'overdue' || (d.status === 'pending' && dueDate < today);
-        
+
         if (isMissed) {
             totalOverdue += (Number(d.totalDue) - Number(d.amountPaid || 0));
             if (!oldestMissedDue || dueDate < new Date(oldestMissedDue.dueDate)) {
@@ -115,17 +119,17 @@ export default function LoanDetail() {
         currentDueId = nextDueRecord.id;
     }
 
-    const sortedPayments = [...payments].sort((a,b) => new Date(b.paymentDate) - new Date(a.paymentDate));
+    const sortedPayments = [...payments].sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
     if (sortedPayments.length > 0) {
         lastPaymentDate = sortedPayments[0].paymentDate;
     }
-    
+
     // Schedule split logic
     const visibleDues = expandFuture ? sortedDues : sortedDues.slice(0, 5);
 
     // Scroll handler for timeline click
     const scrollToRow = (seqId) => {
-        if(activeTab !== 'schedule') setActiveTab('schedule');
+        if (activeTab !== 'schedule') setActiveTab('schedule');
         setTimeout(() => {
             scheduleRowsRef.current[seqId]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 100);
@@ -136,27 +140,40 @@ export default function LoanDetail() {
             {/* 1. STICKY HEADER */}
             <div className="terminal-header" style={{ padding: '4px 0 var(--space-4) 0' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    
+
                     {/* Left: Identity & Asset */}
-                    <div className="flex flex-col gap-0.5">
-                        <div className="flex items-center gap-2 mb-1">
-                            <Link to={`/customers/${loan.customerId}`} className="header-name hover:underline pointer-events-auto" style={{ margin: 0 }}>
-                                {loan.customer?.name}
-                            </Link>
-                            <span className="text-slate-300 font-light">|</span>
-                            <span className="header-phone-top ml-1 text-slate-500">{loan.customer?.phone}</span>
-                            <div className="ml-2">{statusBadge(loan.status)}</div>
-                        </div>
+                    <div className="flex items-center gap-2 mb-1">
+                        <Link to={`/customers/${loan.customerId}`} className="header-name hover:underline pointer-events-auto" style={{ margin: 0 }}>
+                            {loan.customer?.name}
+                        </Link>
+                        <span className="text-slate-300 font-light">|</span>
+                        <span className="header-phone-top ml-1 text-slate-500">{loan.customer?.phone}</span>
+                        <div className="ml-2">{statusBadge(loan.status)}</div>
                     </div>
 
-                    {/* Right: Asset & ID */}
-                    <div className="flex flex-col items-end">
-                        <div className="text-sm font-semibold text-slate-500 uppercase tracking-wide">
-                            {loan.vehicle?.model} | {loan.vehicle?.vehicleNumber}
+                    {/* Right: Vehicle Details & Operations Buttons (Right-most) */}
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className="header-name" style={{ fontSize: '1.5rem', margin: 0 }}>{loan.vehicle?.model}</span>
+                            <span className="text-slate-300 font-light">|</span>
+                            <span className="header-phone-top ml-1 text-slate-500">{loan.vehicle?.vehicleNumber}</span>
                         </div>
-                        <div className="text-sm font-semibold text-slate-400 uppercase tracking-wide font-mono mt-1">
-                            #{id.slice(0, 8).toUpperCase()}
-                        </div>
+                        {(loan.status.toLowerCase() === 'active' || loan.status.toLowerCase() === 'overdue' || loan.status.toLowerCase() === 'pending') && (
+                            <div className="flex items-center gap-2 ml-2">
+                                <button
+                                    className="btn-action-seize"
+                                    onClick={() => setShowSeize(true)}
+                                >
+                                    <AlertTriangle size={12} /> Seize Vehicle
+                                </button>
+                                <button
+                                    className="btn-action-foreclose"
+                                    onClick={() => setShowForeclosure(true)}
+                                >
+                                    <ShieldCheck size={12} /> Foreclose Loan
+                                </button>
+                            </div>
+                        )}
                     </div>
 
                 </div>
@@ -169,7 +186,7 @@ export default function LoanDetail() {
                     <span className="kpi-card-value text-slate-900">{formatCurrency(loan.outstandingPrincipal)}</span>
                 </div>
                 <div className="kpi-card highlight-danger">
-                    <span className="kpi-card-label" style={{color: 'var(--color-danger)'}}>Total Overdue</span>
+                    <span className="kpi-card-label" style={{ color: 'var(--color-danger)' }}>Total Overdue</span>
                     <span className="kpi-card-value danger">{formatCurrency(totalOverdue)}</span>
                 </div>
                 <div className="kpi-card">
@@ -192,15 +209,15 @@ export default function LoanDetail() {
                 <div className="health-strip">
                     {sortedDues.map((d) => {
                         const dDate = new Date(d.dueDate);
-                        dDate.setHours(0,0,0,0);
+                        dDate.setHours(0, 0, 0, 0);
                         const isPastDue = dDate < today;
                         const isFullyPaid = d.status === 'paid';
                         const isPartiallyPaid = Number(d.amountPaid) > 0 && !isFullyPaid;
                         const hasPenalty = Number(d.penaltyDue) > 0;
-                        
+
                         // PREPAID Logic: If any amount is paid and it's not past due
                         const isPrepaid = (isFullyPaid || isPartiallyPaid) && !isPastDue;
-                        
+
                         let blockClass = 'upcoming';
                         let explicitStatus = 'Upcoming';
 
@@ -215,18 +232,18 @@ export default function LoanDetail() {
                         } else if (d.status === 'overdue' || (d.status === 'pending' && isPastDue)) {
                             blockClass = 'overdue'; explicitStatus = 'Overdue';
                         }
-                        
+
                         // Roughly calculate delay
-                        const delayStr = (!isFullyPaid && isPastDue) ? `${Math.ceil((today - dDate)/(1000*60*60*24))} Days` : (hasPenalty ? "Late" : "None");
+                        const delayStr = (!isFullyPaid && isPastDue) ? `${Math.ceil((today - dDate) / (1000 * 60 * 60 * 24))} Days` : (hasPenalty ? "Late" : "None");
 
                         return (
-                            <div 
-                                key={d.id} 
+                            <div
+                                key={d.id}
                                 className={`health-block ${blockClass}`}
                                 onClick={() => scrollToRow(d.id)}
                             >
                                 <div className="timeline-tooltip">
-                                    <div style={{fontWeight: 'bold', borderBottom: '1px solid #475569', paddingBottom: '2px', marginBottom: '2px', fontSize: '10px'}}>{explicitStatus}</div>
+                                    <div style={{ fontWeight: 'bold', borderBottom: '1px solid #475569', paddingBottom: '2px', marginBottom: '2px', fontSize: '10px' }}>{explicitStatus}</div>
                                     <div className="flex justify-between gap-4">
                                         <span className="text-slate-400">Month:</span>
                                         <span className="font-semibold">{new Date(d.dueDate).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}</span>
@@ -257,10 +274,10 @@ export default function LoanDetail() {
 
             {/* 4. MAIN SPLIT LAYOUT */}
             <div className="terminal-layout">
-                
+
                 {/* 70% LEFT -> Dynamic Tab Content */}
                 <div className="terminal-left">
-                    
+
                     {/* A. DUE SCHEDULE */}
                     {activeTab === 'schedule' && (
                         <div className="terminal-panel shadow-sm">
@@ -281,7 +298,7 @@ export default function LoanDetail() {
                                     <tbody>
                                         {visibleDues.map((due) => {
                                             const dueD = new Date(due.dueDate);
-                                            dueD.setHours(0,0,0,0);
+                                            dueD.setHours(0, 0, 0, 0);
                                             const isPastDue = dueD < today;
                                             const isFullyPaid = due.status === 'paid';
                                             const isPartiallyPaid = Number(due.amountPaid) > 0 && !isFullyPaid;
@@ -300,19 +317,18 @@ export default function LoanDetail() {
                                                         <td className="num-col text-right font-bold text-slate-900">{formatCurrency(due.totalDue)}</td>
                                                         <td className="num-col text-right font-semibold text-emerald-600">{Number(due.amountPaid) > 0 ? formatCurrency(due.amountPaid) : '—'}</td>
                                                         <td style={{ textAlign: 'center' }}>
-                                                            <span className={`badge pill-fixed rounded-full px-2.5 py-1 text-xs font-bold leading-none border uppercase ${
-                                                                (isFullyPaid && !isPastDue) ? 'p-prepaid' : 
-                                                                (isPartiallyPaid && !isPastDue) ? 'p-prepaid-partial' : 
-                                                                isPartiallyPaid ? 'p-partial' : 
-                                                                isMissed ? 'p-overdue' : 
-                                                                isFullyPaid ? 'p-paid' : 
-                                                                'p-upcoming'
-                                                            }`}>
-                                                                {(isPartiallyPaid && !isPastDue) ? 'prepaid' : 
-                                                                 (isFullyPaid && !isPastDue) ? 'prepaid' : 
-                                                                 isPartiallyPaid ? 'partial' : 
-                                                                 isMissed ? 'overdue' : 
-                                                                 due.status}
+                                                            <span className={`badge pill-fixed rounded-full px-2.5 py-1 text-xs font-bold leading-none border uppercase ${(isFullyPaid && !isPastDue) ? 'p-prepaid' :
+                                                                (isPartiallyPaid && !isPastDue) ? 'p-prepaid-partial' :
+                                                                    isPartiallyPaid ? 'p-partial' :
+                                                                        isMissed ? 'p-overdue' :
+                                                                            isFullyPaid ? 'p-paid' :
+                                                                                'p-upcoming'
+                                                                }`}>
+                                                                {(isPartiallyPaid && !isPastDue) ? 'prepaid' :
+                                                                    (isFullyPaid && !isPastDue) ? 'prepaid' :
+                                                                        isPartiallyPaid ? 'partial' :
+                                                                            isMissed ? 'overdue' :
+                                                                                due.status}
                                                             </span>
                                                         </td>
                                                     </tr>
@@ -332,12 +348,12 @@ export default function LoanDetail() {
                                                 );
                                             }
                                         })}
-                                        
+
                                         {sortedDues.length > 5 && (
                                             <tr>
                                                 <td colSpan={8} style={{ textAlign: 'center', padding: 0, height: '48px' }}>
-                                                    <button 
-                                                        className="btn btn-ghost btn-sm w-full h-full" 
+                                                    <button
+                                                        className="btn btn-ghost btn-sm w-full h-full"
                                                         style={{ borderRadius: 0, fontSize: '11px', fontWeight: 600, color: 'var(--slate-500)' }}
                                                         onClick={() => setExpandFuture(!expandFuture)}
                                                     >
@@ -410,15 +426,15 @@ export default function LoanDetail() {
                                     </div>
                                 </div>
                                 {loan.vehicle?.rcImageUrl && (
-                                <div className="doc-item">
-                                    <div>
-                                        <div className="font-medium text-slate-700">Vehicle RC</div>
-                                        <div className="text-[10px] text-slate-400">Found on record</div>
+                                    <div className="doc-item">
+                                        <div>
+                                            <div className="font-medium text-slate-700">Vehicle RC</div>
+                                            <div className="text-[10px] text-slate-400">Found on record</div>
+                                        </div>
+                                        <div className="flex gap-2 text-brand-primary">
+                                            <button className="btn btn-ghost btn-sm px-2" onClick={() => window.open(loan.vehicle.rcImageUrl, '_blank')}><Eye size={14} className="mr-1" /> View</button>
+                                        </div>
                                     </div>
-                                    <div className="flex gap-2 text-brand-primary">
-                                        <button className="btn btn-ghost btn-sm px-2" onClick={() => window.open(loan.vehicle.rcImageUrl, '_blank')}><Eye size={14} className="mr-1" /> View</button>
-                                    </div>
-                                </div>
                                 )}
                             </div>
                         </div>
@@ -544,6 +560,33 @@ export default function LoanDetail() {
                     task={{ ...callTask, loan, outstandingPrincipal: Number(loan.outstandingPrincipal) }}
                     onClose={() => setShowCallLog(false)}
                     onSuccess={() => { setShowCallLog(false); loadLoan(); }}
+                />
+            )}
+
+            {showSeize && (
+                <SeizureModal
+                    loanId={loan.id}
+                    vehicleId={loan.vehicle?.id}
+                    customerName={loan.customer?.name}
+                    vehicleNumber={loan.vehicle?.vehicleNumber}
+                    onClose={() => setShowSeize(false)}
+                    onSuccess={() => {
+                        setShowSeize(false);
+                        loadLoan();
+                    }}
+                />
+            )}
+
+            {showForeclosure && (
+                <ForeclosureModal
+                    loanId={loan.id}
+                    customerName={loan.customer?.name}
+                    vehicleNumber={loan.vehicle?.vehicleNumber}
+                    onClose={() => setShowForeclosure(false)}
+                    onSuccess={() => {
+                        setShowForeclosure(false);
+                        loadLoan();
+                    }}
                 />
             )}
         </div>

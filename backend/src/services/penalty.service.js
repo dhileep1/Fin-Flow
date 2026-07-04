@@ -17,6 +17,9 @@ async function accrueDailyPenalties(orgId = null) {
     const where = {
         dueDate: { lt: today },
         status: { not: 'paid' },
+        loan: {
+            status: { notIn: ['seized', 'closed'] }
+        }
     };
     if (orgId) where.orgId = orgId;
 

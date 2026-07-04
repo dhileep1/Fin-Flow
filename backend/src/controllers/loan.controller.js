@@ -146,4 +146,48 @@ async function getDues(req, res, next) {
     }
 }
 
-module.exports = { createLoan, getLoan, listLoans, getDues };
+async function getForeclosureQuote(req, res, next) {
+    try {
+        const { foreclosureRate } = req.query;
+        if (!foreclosureRate) {
+            return res.status(400).json({ error: 'foreclosureRate is required' });
+        }
+        const rate = Number(foreclosureRate);
+        if (isNaN(rate) || rate < 0) {
+            return res.status(400).json({ error: 'foreclosureRate must be a positive number' });
+        }
+
+        const quote = await loanService.calculateForeclosureQuote(req.orgId, req.params.id, rate);
+        res.json(quote);
+    } catch (err) {
+        next(err);
+    }
+}
+
+async function forecloseLoan(req, res, next) {
+    try {
+        const { foreclosureRate, paymentMethod, referenceNumber, paymentDate } = req.body;
+        if (!foreclosureRate) {
+            return res.status(400).json({ error: 'foreclosureRate is required' });
+        }
+        const rate = Number(foreclosureRate);
+        if (isNaN(rate) || rate < 0) {
+            return res.status(400).json({ error: 'foreclosureRate must be a positive number' });
+        }
+
+        const result = await loanService.executeForeclosure(req.orgId, req.params.id, {
+            foreclosureRate: rate,
+            paymentMethod,
+            referenceNumber,
+            createdBy: req.user.id,
+            paymentDate
+        });
+
+        res.json(result);
+    } catch (err) {
+        next(err);
+    }
+}
+
+module.exports = { createLoan, getLoan, listLoans, getDues, getForeclosureQuote, forecloseLoan };
+
