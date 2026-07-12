@@ -45,27 +45,4 @@ async function login(req, res, next) {
     }
 }
 
-async function register(req, res, next) {
-    try {
-        const orgId = req.params.orgId;
-        const { name, email, phone, password, role } = req.body;
-
-        if (!name || !password || !role) {
-            return res.status(400).json({ error: 'Name, password, and role are required' });
-        }
-
-        const passwordHash = await bcrypt.hash(password, 12);
-
-        const user = await prisma.user.create({
-            data: { orgId, name, email, phone, passwordHash, role },
-        });
-
-        res.status(201).json({
-            user: { id: user.id, name: user.name, role: user.role, orgId: user.orgId },
-        });
-    } catch (err) {
-        next(err);
-    }
-}
-
-module.exports = { login, register };
+module.exports = { login };

@@ -18,10 +18,16 @@ router.get('/settings', requireRole('admin'), async (req, res, next) => {
 
 router.put('/settings', requireRole('admin'), async (req, res, next) => {
     try {
-        const { name, phone, address, settings } = req.body;
+        const { name, phone, address, startingCash } = req.body;
         const oldOrg = await prisma.organization.findUnique({
             where: { id: req.orgId }
         });
+        
+        const settings = {
+            ...(oldOrg.settings || {}),
+            startingCash: startingCash !== undefined ? Number(startingCash) : (oldOrg.settings?.startingCash || 0)
+        };
+
         const org = await prisma.organization.update({
             where: { id: req.orgId },
             data: { name, phone, address, settings },
@@ -35,8 +41,8 @@ router.put('/settings', requireRole('admin'), async (req, res, next) => {
             entityType: 'organization',
             entityId: req.orgId,
             details: {
-                previous: { name: oldOrg.name, phone: oldOrg.phone, address: oldOrg.address },
-                updated: { name, phone, address }
+                previous: { name: oldOrg.name, phone: oldOrg.phone, address: oldOrg.address, settings: oldOrg.settings },
+                updated: { name, phone, address, settings }
             }
         });
 

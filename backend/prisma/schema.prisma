@@ -53,7 +53,8 @@ model User {
   expenses       Expense[]     @relation("ExpenseCreator")
   seizures       VehicleSeizure[] @relation("SeizureExecutor")
 
-  @@index([orgId, phone])
+  @@unique([orgId, phone], map: "ux_users_org_phone")
+  @@unique([orgId, email], map: "ux_users_org_email")
   @@map("users")
 }
 
@@ -75,7 +76,7 @@ model Customer {
   notifications Notification[]
   guarantorInstances Guarantor[] @relation("CustomerGuarantor")
 
-  @@index([orgId, phone])
+  @@unique([orgId, phone], map: "ux_customers_org_phone")
   @@map("customers")
 }
 
@@ -97,7 +98,7 @@ model Vehicle {
   loans    Loan[]
   seizures VehicleSeizure[]
 
-  @@index([orgId, vehicleNumber])
+  @@unique([orgId, vehicleNumber], map: "ux_vehicles_org_number")
   @@map("vehicles")
 }
 
@@ -212,6 +213,8 @@ model Payment {
   paymentDate     DateTime @default(now()) @map("payment_date")
   createdBy       String?  @map("created_by") @db.Uuid
 
+  idempotencyKey  String?  @map("idempotency_key")
+
   org      Organization @relation(fields: [orgId], references: [id])
   loan     Loan         @relation(fields: [loanId], references: [id])
   loanDue  LoanDue?     @relation(fields: [loanDueId], references: [id])
@@ -220,6 +223,7 @@ model Payment {
 
   @@index([loanId])
   @@index([paymentDate])
+  @@unique([orgId, idempotencyKey], map: "ux_payments_org_idempotency")
   @@map("payments")
 }
 
@@ -235,6 +239,7 @@ model Receipt {
   org     Organization @relation(fields: [orgId], references: [id])
   payment Payment      @relation(fields: [paymentId], references: [id])
 
+  @@unique([orgId, receiptNumber], map: "ux_receipts_org_number")
   @@map("receipts")
 }
 

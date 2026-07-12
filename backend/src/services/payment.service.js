@@ -19,6 +19,12 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
             orderBy: { dueDate: 'asc' },
         });
 
+        // 1. Overpayment validation: prevent payment exceeding total outstanding
+        const totalOutstanding = dues.reduce((sum, due) => sum + roundHalfUp(Number(due.totalDue) - Number(due.amountPaid)), 0);
+        if (remaining > roundHalfUp(totalOutstanding + 0.05)) {
+            throw new Error(`Payment amount ${amount} exceeds the total outstanding balance of ${roundHalfUp(totalOutstanding)}`);
+        }
+
         for (const due of dues) {
             if (remaining <= 0) break;
 
@@ -34,61 +40,47 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
                 total: 0,
             };
 
-            if (remaining >= dueRemaining) {
-                // Full payment of this due
-                allocation.total = dueRemaining;
+            const paymentToApply = Math.min(remaining, dueRemaining);
+            allocation.total = roundHalfUp(paymentToApply);
 
-                // Allocate to components in order: penalty, interest, principal
-                let leftover = dueRemaining;
-                const penaltyRemaining = roundHalfUp(Number(due.penaltyDue) - Math.max(0, Number(due.amountPaid) - Number(due.principalDue) - Number(due.interestDue)));
-                const penaltyAlloc = Math.min(leftover, Math.max(0, penaltyRemaining));
-                allocation.penalty = roundHalfUp(penaltyAlloc);
-                leftover -= penaltyAlloc;
+            // Determine how much of the existing due.amountPaid was allocated to penalty, interest, principal
+            // using the strict priority order: Penalty -> Interest -> Principal
+            const amountPaidSoFar = Number(due.amountPaid);
+            const penaltyPaid = Math.min(amountPaidSoFar, Number(due.penaltyDue));
+            const interestPaid = Math.min(Math.max(0, amountPaidSoFar - Number(due.penaltyDue)), Number(due.interestDue));
+            const principalPaid = Math.max(0, amountPaidSoFar - Number(due.penaltyDue) - Number(due.interestDue));
 
-                const interestAlloc = Math.min(leftover, Number(due.interestDue));
-                allocation.interest = roundHalfUp(interestAlloc);
-                leftover -= interestAlloc;
+            // Unpaid portions of components
+            const penaltyUnpaid = roundHalfUp(Number(due.penaltyDue) - penaltyPaid);
+            const interestUnpaid = roundHalfUp(Number(due.interestDue) - interestPaid);
+            const principalUnpaid = roundHalfUp(Number(due.principalDue) - principalPaid);
 
-                allocation.principal = roundHalfUp(leftover);
+            // Allocate paymentToApply across unpaid components in order: Penalty -> Interest -> Principal
+            let leftover = paymentToApply;
 
-                await tx.loanDue.update({
-                    where: { id: due.id },
-                    data: {
-                        amountPaid: Number(due.totalDue),
-                        status: 'paid',
-                    },
-                });
+            const penaltyAlloc = Math.min(leftover, penaltyUnpaid);
+            allocation.penalty = roundHalfUp(penaltyAlloc);
+            leftover = roundHalfUp(leftover - penaltyAlloc);
 
-                remaining = roundHalfUp(remaining - dueRemaining);
-            } else {
-                // Partial payment
-                allocation.total = roundHalfUp(remaining);
+            const interestAlloc = Math.min(leftover, interestUnpaid);
+            allocation.interest = roundHalfUp(interestAlloc);
+            leftover = roundHalfUp(leftover - interestAlloc);
 
-                // Allocate remaining in order: penalty, interest, principal
-                let leftover = remaining;
-                const penaltyUnpaid = roundHalfUp(Math.max(0, Number(due.penaltyDue)));
-                const penaltyAlloc = Math.min(leftover, penaltyUnpaid);
-                allocation.penalty = roundHalfUp(penaltyAlloc);
-                leftover = roundHalfUp(leftover - penaltyAlloc);
+            allocation.principal = roundHalfUp(leftover); // Remaining goes to principal
 
-                const interestUnpaid = Number(due.interestDue);
-                const interestAlloc = Math.min(leftover, interestUnpaid);
-                allocation.interest = roundHalfUp(interestAlloc);
-                leftover = roundHalfUp(leftover - interestAlloc);
+            // Update the due
+            const newAmountPaid = roundHalfUp(amountPaidSoFar + paymentToApply);
+            const isPaid = newAmountPaid >= Number(due.totalDue) - 0.01;
 
-                allocation.principal = roundHalfUp(leftover);
+            await tx.loanDue.update({
+                where: { id: due.id },
+                data: {
+                    amountPaid: newAmountPaid,
+                    status: isPaid ? 'paid' : 'pending',
+                },
+            });
 
-                await tx.loanDue.update({
-                    where: { id: due.id },
-                    data: {
-                        amountPaid: roundHalfUp(Number(due.amountPaid) + remaining),
-                        status: 'pending',
-                    },
-                });
-
-                remaining = 0;
-            }
-
+            remaining = roundHalfUp(remaining - paymentToApply);
             allocationDetails.push(allocation);
         }
 

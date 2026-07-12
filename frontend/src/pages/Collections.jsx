@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import api from '../api/client';
-import { Wallet, Calendar, User, Search, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Hash, TrendingUp, Landmark, Receipt, ArrowDownCircle, PlusCircle, X } from 'lucide-react';
+import { Wallet, Calendar, User, Search, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Settings, Hash, TrendingUp, Landmark, Receipt, ArrowDownCircle, PlusCircle, X, Coins } from 'lucide-react';
 
 const PAGE_SIZE = 10;
 
@@ -33,26 +33,22 @@ export default function Collections() {
     const [loading, setLoading] = useState(true);
     
     // Tab and filter states
-    const [activeTab, setActiveTab] = useState('all'); // 'all' | 'payments' | 'docCharges' | 'expenses'
-    const [dateFilter, setDateFilter] = useState('month'); // 'all' | 'today' | 'week' | 'month' | 'custom'
+    const [activeTab, setActiveTab] = useState('all'); // 'all' | 'payments' | 'docCharges' | 'loans' | 'expenses'
+    const [dateFilter, setDateFilter] = useState('month'); // 'today' | 'week' | 'month' | 'year' | 'custom'
+    const [aggregationLevel, setAggregationLevel] = useState('day'); // 'day' | 'week' | 'month' | 'year'
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
-    const [expandedDates, setExpandedDates] = useState({});
-    const [openingCashInHand, setOpeningCashInHand] = useState(() => {
-        const saved = localStorage.getItem('openingCashInHand');
-        return saved ? Number(saved) : 1000000;
-    });
+    const [expandedDates, setExpandedDates] = useState({}); // Stores expanded keys: e.g. "year-2026", "month-2026-07"
+    const [openingCashInHand, setOpeningCashInHand] = useState(1000000);
 
-    const handleOpeningCashChange = (val) => {
-        setOpeningCashInHand(val);
-        localStorage.setItem('openingCashInHand', val);
-    };
+    const [showLedgerSettings, setShowLedgerSettings] = useState(false);
     
     // Pagination states
     const [allPage, setAllPage] = useState(1);
     const [paymentPage, setPaymentPage] = useState(1);
     const [loanPage, setLoanPage] = useState(1);
+    const [loansGivenPage, setLoansGivenPage] = useState(1);
     const [expensePage, setExpensePage] = useState(1);
 
     // Modal state for adding expense
@@ -66,14 +62,18 @@ export default function Collections() {
 
     const fetchAllData = async () => {
         try {
-            const [paymentsData, loansData, expensesData] = await Promise.all([
+            const [paymentsData, loansData, expensesData, orgData] = await Promise.all([
                 api.getPayments(),
                 api.getLoans('limit=1000'),
-                api.getExpenses()
+                api.getExpenses(),
+                api.getOrgSettings()
             ]);
             setPayments(paymentsData || []);
             setLoans(loansData?.loans || []);
             setExpenses(expensesData || []);
+            if (orgData?.settings?.startingCash !== undefined) {
+                setOpeningCashInHand(Number(orgData.settings.startingCash));
+            }
         } catch (err) {
             console.error('Failed to load collections/expenses data:', err);
         }
@@ -120,34 +120,35 @@ export default function Collections() {
         }
     };
 
-    // Filter payments based on date selection
-    const dateFilteredPayments = useMemo(() => {
+    // Helper to filter items based on dateFilter selection
+    const getFilteredTransactions = (items, dateKeyExtractor) => {
         const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        return payments.filter(p => {
-            if (!p.paymentDate) return false;
-            const pDate = new Date(p.paymentDate);
-            if (isNaN(pDate.getTime())) return false;
+        return items.filter(item => {
+            const dateVal = dateKeyExtractor(item);
+            if (!dateVal) return false;
+            const d = new Date(dateVal);
+            if (isNaN(d.getTime())) return false;
 
             if (dateFilter === 'today') {
                 const start = new Date(today);
+                start.setHours(0, 0, 0, 0);
                 const end = new Date(today);
                 end.setHours(23, 59, 59, 999);
-                return pDate >= start && pDate <= end;
+                return d >= start && d <= end;
             }
             if (dateFilter === 'week') {
                 const start = new Date(today);
                 start.setDate(today.getDate() - 7);
+                start.setHours(0, 0, 0, 0);
                 const end = new Date(today);
                 end.setHours(23, 59, 59, 999);
-                return pDate >= start && pDate <= end;
+                return d >= start && d <= end;
             }
             if (dateFilter === 'month') {
-                const start = new Date(today.getFullYear(), today.getMonth(), 1);
-                const end = new Date(today);
-                end.setHours(23, 59, 59, 999);
-                return pDate >= start && pDate <= end;
+                return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth();
+            }
+            if (dateFilter === 'year') {
+                return d.getFullYear() === today.getFullYear();
             }
             if (dateFilter === 'custom') {
                 if (!customFrom || !customTo) return true;
@@ -155,92 +156,25 @@ export default function Collections() {
                 start.setHours(0, 0, 0, 0);
                 const end = new Date(customTo);
                 end.setHours(23, 59, 59, 999);
-                return pDate >= start && pDate <= end;
+                return d >= start && d <= end;
             }
             return true;
         });
+    };
+
+    // Filter payments based on date selection
+    const dateFilteredPayments = useMemo(() => {
+        return getFilteredTransactions(payments, p => p.paymentDate);
     }, [payments, dateFilter, customFrom, customTo]);
 
     // Filter loans (for document charges) based on date selection
     const dateFilteredLoans = useMemo(() => {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        return loans.filter(l => {
-            if (!l.startDate) return false;
-            const lDate = new Date(l.startDate);
-            if (isNaN(lDate.getTime())) return false;
-
-            if (dateFilter === 'today') {
-                const start = new Date(today);
-                const end = new Date(today);
-                end.setHours(23, 59, 59, 999);
-                return lDate >= start && lDate <= end;
-            }
-            if (dateFilter === 'week') {
-                const start = new Date(today);
-                start.setDate(today.getDate() - 7);
-                const end = new Date(today);
-                end.setHours(23, 59, 59, 999);
-                return lDate >= start && lDate <= end;
-            }
-            if (dateFilter === 'month') {
-                const start = new Date(today.getFullYear(), today.getMonth(), 1);
-                const end = new Date(today);
-                end.setHours(23, 59, 59, 999);
-                return lDate >= start && lDate <= end;
-            }
-            if (dateFilter === 'custom') {
-                if (!customFrom || !customTo) return true;
-                const start = new Date(customFrom);
-                start.setHours(0, 0, 0, 0);
-                const end = new Date(customTo);
-                end.setHours(23, 59, 59, 999);
-                return lDate >= start && lDate <= end;
-            }
-            return true;
-        });
+        return getFilteredTransactions(loans, l => l.startDate);
     }, [loans, dateFilter, customFrom, customTo]);
 
     // Filter expenses based on date selection
     const dateFilteredExpenses = useMemo(() => {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        return expenses.filter(e => {
-            if (!e.expenseDate) return false;
-            const eDate = new Date(e.expenseDate);
-            if (isNaN(eDate.getTime())) return false;
-
-            if (dateFilter === 'today') {
-                const start = new Date(today);
-                const end = new Date(today);
-                end.setHours(23, 59, 59, 999);
-                return eDate >= start && eDate <= end;
-            }
-            if (dateFilter === 'week') {
-                const start = new Date(today);
-                start.setDate(today.getDate() - 7);
-                const end = new Date(today);
-                end.setHours(23, 59, 59, 999);
-                return eDate >= start && eDate <= end;
-            }
-            if (dateFilter === 'month') {
-                const start = new Date(today.getFullYear(), today.getMonth(), 1);
-                const end = new Date(today);
-                end.setHours(23, 59, 59, 999);
-                return eDate >= start && eDate <= end;
-            }
-            if (dateFilter === 'custom') {
-                if (!customFrom || !customTo) return true;
-                const start = new Date(customFrom);
-                start.setHours(0, 0, 0, 0);
-                const end = new Date(customTo);
-                end.setHours(23, 59, 59, 999);
-                return eDate >= start && eDate <= end;
-            }
-            return true;
-        });
+        return getFilteredTransactions(expenses, e => e.expenseDate);
     }, [expenses, dateFilter, customFrom, customTo]);
 
     // Filter payments by search query
@@ -280,7 +214,7 @@ export default function Collections() {
         });
     }, [dateFilteredExpenses, searchQuery]);
 
-    // Helper to get local YYYY-MM-DD
+    // Helpers to parse date values locally
     const getLocalDateString = (dateVal) => {
         if (!dateVal) return '';
         try {
@@ -295,85 +229,121 @@ export default function Collections() {
         }
     };
 
-    // Group all transactions chronologically to calculate true running balance
+    const getLocalMonthString = (dateVal) => {
+        if (!dateVal) return '';
+        try {
+            const d = new Date(dateVal);
+            if (isNaN(d.getTime())) return '';
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            return `${year}-${month}`;
+        } catch {
+            return '';
+        }
+    };
+
+    const getLocalYearString = (dateVal) => {
+        if (!dateVal) return '';
+        try {
+            const d = new Date(dateVal);
+            if (isNaN(d.getTime())) return '';
+            return String(d.getFullYear());
+        } catch {
+            return '';
+        }
+    };
+
+    const getLocalWeekString = (dateVal) => {
+        if (!dateVal) return '';
+        try {
+            const d = new Date(dateVal);
+            if (isNaN(d.getTime())) return '';
+            const target = new Date(d.valueOf());
+            const dayNr = (d.getDay() + 6) % 7;
+            target.setDate(target.getDate() - dayNr + 3);
+            const firstThursday = target.valueOf();
+            target.setMonth(0, 1);
+            if (target.getDay() !== 4) {
+                target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
+            }
+            const weekNum = 1 + Math.ceil((firstThursday - target) / 604800000);
+            return `${d.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+        } catch {
+            return '';
+        }
+    };
+
+    // Helper to get formatted date aggregation key
+    const getGroupKey = (dateVal, level) => {
+        if (level === 'year') return getLocalYearString(dateVal);
+        if (level === 'month') return getLocalMonthString(dateVal);
+        if (level === 'week') return getLocalWeekString(dateVal);
+        return getLocalDateString(dateVal);
+    };
+
+    // Build hierarchical trees dynamically and calculate correct opening/closing balance
+    const buildGroupNode = (key, rawPayments, rawLoans, rawExpenses) => {
+        const node = {
+            date: key,
+            payments: rawPayments,
+            loans: rawLoans,
+            expenses: rawExpenses,
+            collection: 0,
+            docCharges: 0,
+            expensesAmt: 0,
+            given: 0,
+            inflow: 0,
+            outflow: 0,
+            tally: 0
+        };
+        rawPayments.forEach(p => { node.collection += Number(p.amount || 0); });
+        rawLoans.forEach(l => {
+            node.docCharges += Number(l.documentFee || 0);
+            node.given += Number(l.principalAmount || 0);
+        });
+        rawExpenses.forEach(e => { node.expensesAmt += Number(e.amount || 0); });
+        node.inflow = node.collection + node.docCharges;
+        node.outflow = node.expensesAmt + node.given;
+        node.tally = node.inflow - node.outflow;
+        return node;
+    };
+
+    // Group all filtered transactions at selected top aggregation level
     const allDateGroups = useMemo(() => {
         const groups = {};
 
-        payments.forEach(p => {
-            const dateStr = getLocalDateString(p.paymentDate);
-            if (!dateStr) return;
-            if (!groups[dateStr]) {
-                groups[dateStr] = {
-                    date: dateStr,
-                    payments: [],
-                    loans: [],
-                    expenses: [],
-                    collection: 0,
-                    docCharges: 0,
-                    expensesAmt: 0,
-                    given: 0,
-                    inflow: 0,
-                    outflow: 0,
-                    tally: 0
-                };
-            }
-            groups[dateStr].payments.push(p);
-            groups[dateStr].collection += Number(p.amount || 0);
+        filteredPayments.forEach(p => {
+            const key = getGroupKey(p.paymentDate, aggregationLevel);
+            if (!key) return;
+            if (!groups[key]) groups[key] = { payments: [], loans: [], expenses: [] };
+            groups[key].payments.push(p);
         });
 
-        loans.forEach(l => {
-            const dateStr = getLocalDateString(l.startDate);
-            if (!dateStr) return;
-            if (!groups[dateStr]) {
-                groups[dateStr] = {
-                    date: dateStr,
-                    payments: [],
-                    loans: [],
-                    expenses: [],
-                    collection: 0,
-                    docCharges: 0,
-                    expensesAmt: 0,
-                    given: 0,
-                    inflow: 0,
-                    outflow: 0,
-                    tally: 0
-                };
-            }
-            groups[dateStr].loans.push(l);
-            groups[dateStr].docCharges += Number(l.documentFee || 0);
-            groups[dateStr].given += Number(l.principalAmount || 0);
+        filteredLoans.forEach(l => {
+            const key = getGroupKey(l.startDate, aggregationLevel);
+            if (!key) return;
+            if (!groups[key]) groups[key] = { payments: [], loans: [], expenses: [] };
+            groups[key].loans.push(l);
         });
 
-        expenses.forEach(e => {
-            const dateStr = getLocalDateString(e.expenseDate);
-            if (!dateStr) return;
-            if (!groups[dateStr]) {
-                groups[dateStr] = {
-                    date: dateStr,
-                    payments: [],
-                    loans: [],
-                    expenses: [],
-                    collection: 0,
-                    docCharges: 0,
-                    expensesAmt: 0,
-                    given: 0,
-                    inflow: 0,
-                    outflow: 0,
-                    tally: 0
-                };
-            }
-            groups[dateStr].expenses.push(e);
-            groups[dateStr].expensesAmt += Number(e.amount || 0);
+        filteredExpenses.forEach(e => {
+            const key = getGroupKey(e.expenseDate, aggregationLevel);
+            if (!key) return;
+            if (!groups[key]) groups[key] = { payments: [], loans: [], expenses: [] };
+            groups[key].expenses.push(e);
         });
 
-        Object.values(groups).forEach(g => {
-            g.inflow = g.collection + g.docCharges;
-            g.outflow = g.expensesAmt + g.given;
-            g.tally = g.inflow - g.outflow;
+        const list = Object.keys(groups).map(key => {
+            return buildGroupNode(key, groups[key].payments, groups[key].loans, groups[key].expenses);
         });
 
         // Sort ascending chronologically to compute running balance
-        const sorted = Object.values(groups).sort((a, b) => new Date(a.date) - new Date(b.date));
+        const sorted = list.sort((a, b) => {
+            if (aggregationLevel === 'week') {
+                return a.date.localeCompare(b.date);
+            }
+            return new Date(a.date) - new Date(b.date);
+        });
 
         let running = Number(openingCashInHand || 0);
         sorted.forEach(g => {
@@ -382,86 +352,13 @@ export default function Collections() {
             running = g.closingBalance;
         });
 
-        // Return descending (newest first)
         return sorted.reverse();
-    }, [payments, loans, expenses, openingCashInHand]);
+    }, [filteredPayments, filteredLoans, filteredExpenses, aggregationLevel, openingCashInHand]);
 
-    // Apply date and search filters to date groups for display
+    // Apply date range filters to date groups for display
     const filteredDateGroups = useMemo(() => {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        let list = allDateGroups.filter(g => {
-            const gDate = new Date(g.date);
-            if (isNaN(gDate.getTime())) return false;
-
-            if (dateFilter === 'today') {
-                const start = new Date(today);
-                const end = new Date(today);
-                end.setHours(23, 59, 59, 999);
-                return gDate >= start && gDate <= end;
-            }
-            if (dateFilter === 'week') {
-                const start = new Date(today);
-                start.setDate(today.getDate() - 7);
-                const end = new Date(today);
-                end.setHours(23, 59, 59, 999);
-                return gDate >= start && gDate <= end;
-            }
-            if (dateFilter === 'month') {
-                const start = new Date(today.getFullYear(), today.getMonth(), 1);
-                const end = new Date(today);
-                end.setHours(23, 59, 59, 999);
-                return gDate >= start && gDate <= end;
-            }
-            if (dateFilter === 'custom') {
-                if (!customFrom || !customTo) return true;
-                const start = new Date(customFrom);
-                start.setHours(0, 0, 0, 0);
-                const end = new Date(customTo);
-                end.setHours(23, 59, 59, 999);
-                return gDate >= start && gDate <= end;
-            }
-            return true;
-        });
-
-        if (searchQuery.trim()) {
-            const q = searchQuery.toLowerCase();
-            list = list.map(g => {
-                const paymentsMatch = g.payments.filter(p => {
-                    const customerName = p.loan?.customer?.name?.toLowerCase() || '';
-                    const loanNo = p.loanId?.slice(0, 8).toLowerCase() || '';
-                    const creatorName = p.creator?.name?.toLowerCase() || '';
-                    const billNo = p.receipts?.[0]?.receiptNumber?.toLowerCase() || '';
-                    return customerName.includes(q) || loanNo.includes(q) || creatorName.includes(q) || billNo.includes(q);
-                });
-                const loansMatch = g.loans.filter(l => {
-                    const customerName = l.customer?.name?.toLowerCase() || '';
-                    const loanNo = l.id?.slice(0, 8).toLowerCase() || '';
-                    return customerName.includes(q) || loanNo.includes(q);
-                });
-                const expensesMatch = g.expenses.filter(e => {
-                    const category = e.category?.toLowerCase() || '';
-                    const desc = e.description?.toLowerCase() || '';
-                    const creatorName = e.creator?.name?.toLowerCase() || '';
-                    const matchesTag = e.tags?.some(t => t.toLowerCase().includes(q)) || false;
-                    return category.includes(q) || desc.includes(q) || creatorName.includes(q) || matchesTag;
-                });
-
-                if (paymentsMatch.length > 0 || loansMatch.length > 0 || expensesMatch.length > 0) {
-                    return {
-                        ...g,
-                        payments: paymentsMatch,
-                        loans: loansMatch,
-                        expenses: expensesMatch
-                    };
-                }
-                return null;
-            }).filter(Boolean);
-        }
-
-        return list;
-    }, [allDateGroups, dateFilter, customFrom, customTo, searchQuery]);
+        return allDateGroups;
+    }, [allDateGroups]);
 
     const getDetailedTxListForDate = (group) => {
         const list = [];
@@ -540,6 +437,12 @@ export default function Collections() {
         return filteredLoans.slice(start, start + PAGE_SIZE);
     }, [filteredLoans, loanPage]);
 
+    // Paginate filtered loans given
+    const pagedLoansGiven = useMemo(() => {
+        const start = (loansGivenPage - 1) * PAGE_SIZE;
+        return filteredLoans.slice(start, start + PAGE_SIZE);
+    }, [filteredLoans, loansGivenPage]);
+
     // Paginate filtered expenses
     const pagedExpenses = useMemo(() => {
         const start = (expensePage - 1) * PAGE_SIZE;
@@ -549,21 +452,208 @@ export default function Collections() {
     const totalAllPages = Math.max(1, Math.ceil(filteredDateGroups.length / PAGE_SIZE));
     const totalPaymentPages = Math.max(1, Math.ceil(filteredPayments.length / PAGE_SIZE));
     const totalLoanPages = Math.max(1, Math.ceil(filteredLoans.length / PAGE_SIZE));
+    const totalLoansGivenPages = Math.max(1, Math.ceil(filteredLoans.length / PAGE_SIZE));
     const totalExpensePages = Math.max(1, Math.ceil(filteredExpenses.length / PAGE_SIZE));
 
+    // Filter date groups so we only display periods with relevant data for specific tabs
+    const tabGroups = useMemo(() => {
+        return allDateGroups.filter(g => {
+            if (activeTab === 'all') return true;
+            if (activeTab === 'payments') return g.payments.length > 0;
+            if (activeTab === 'docCharges') return g.loans.some(l => Number(l.documentFee) > 0);
+            if (activeTab === 'loans') return g.loans.length > 0;
+            if (activeTab === 'expenses') return g.expenses.length > 0;
+            return false;
+        });
+    }, [allDateGroups, activeTab]);
+
+    // Paginate tab-specific groups
+    const pagedTabGroups = useMemo(() => {
+        let page = 1;
+        if (activeTab === 'all') page = allPage;
+        else if (activeTab === 'payments') page = paymentPage;
+        else if (activeTab === 'docCharges') page = loanPage;
+        else if (activeTab === 'loans') page = loansGivenPage;
+        else if (activeTab === 'expenses') page = expensePage;
+
+        const start = (page - 1) * PAGE_SIZE;
+        return tabGroups.slice(start, start + PAGE_SIZE);
+    }, [tabGroups, activeTab, allPage, paymentPage, loanPage, loansGivenPage, expensePage]);
+
+    const totalTabGroupPages = Math.max(1, Math.ceil(tabGroups.length / PAGE_SIZE));
+
     const startIdx = useMemo(() => {
-        if (activeTab === 'all') return (allPage - 1) * PAGE_SIZE + 1;
-        if (activeTab === 'payments') return (paymentPage - 1) * PAGE_SIZE + 1;
-        if (activeTab === 'docCharges') return (loanPage - 1) * PAGE_SIZE + 1;
-        return (expensePage - 1) * PAGE_SIZE + 1;
-    }, [activeTab, allPage, paymentPage, loanPage, expensePage]);
+        let page = 1;
+        if (activeTab === 'all') page = allPage;
+        else if (activeTab === 'payments') page = paymentPage;
+        else if (activeTab === 'docCharges') page = loanPage;
+        else if (activeTab === 'loans') page = loansGivenPage;
+        else if (activeTab === 'expenses') page = expensePage;
+        return (page - 1) * PAGE_SIZE + 1;
+    }, [activeTab, allPage, paymentPage, loanPage, loansGivenPage, expensePage]);
 
     const endIdx = useMemo(() => {
-        if (activeTab === 'all') return Math.min(allPage * PAGE_SIZE, filteredDateGroups.length);
-        if (activeTab === 'payments') return Math.min(paymentPage * PAGE_SIZE, filteredPayments.length);
-        if (activeTab === 'docCharges') return Math.min(loanPage * PAGE_SIZE, filteredLoans.length);
-        return Math.min(expensePage * PAGE_SIZE, filteredExpenses.length);
-    }, [activeTab, allPage, paymentPage, loanPage, expensePage, filteredDateGroups, filteredPayments, filteredLoans, filteredExpenses]);
+        let page = 1;
+        let totalCount = 0;
+        if (activeTab === 'all') { page = allPage; totalCount = filteredDateGroups.length; }
+        else if (activeTab === 'payments') { page = paymentPage; totalCount = tabGroups.length; }
+        else if (activeTab === 'docCharges') { page = loanPage; totalCount = tabGroups.length; }
+        else if (activeTab === 'loans') { page = loansGivenPage; totalCount = tabGroups.length; }
+        else if (activeTab === 'expenses') { page = expensePage; totalCount = tabGroups.length; }
+        return Math.min(page * PAGE_SIZE, totalCount);
+    }, [activeTab, allPage, paymentPage, loanPage, loansGivenPage, expensePage, filteredDateGroups, tabGroups]);
+
+    // Sub-table and formatting helpers for grouped expansion views
+    const renderGroupLabel = (key) => {
+        if (aggregationLevel === 'year') {
+            return key;
+        }
+        if (aggregationLevel === 'month') {
+            const [year, monthStr] = key.split('-');
+            const date = new Date(Number(year), Number(monthStr) - 1, 1);
+            return date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+        }
+        if (aggregationLevel === 'week') {
+            return `Week ${key.split('-W')[1]} (${key.split('-W')[0]})`;
+        }
+        return formatDate(key);
+    };
+
+    const renderPaymentsSubTable = (list) => (
+        <div className="border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm" style={{ margin: '4px 0 12px 0' }}>
+            <table className="w-full text-xs">
+                <thead>
+                    <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
+                        <th className="px-4 py-2.5 text-left">Date</th>
+                        <th className="px-4 py-2.5 text-left">Bill No</th>
+                        <th className="px-4 py-2.5 text-left">Loan No</th>
+                        <th className="px-4 py-2.5 text-left">Customer</th>
+                        <th className="px-4 py-2.5 text-center">Principal Paid</th>
+                        <th className="px-4 py-2.5 text-center">Interest Paid</th>
+                        <th className="px-4 py-2.5 text-center">Total Paid</th>
+                        <th className="px-4 py-2.5 text-center">Collected By</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                    {list.map(p => {
+                        const { principalPaid, interestPaid } = getBreakdown(p);
+                        const billNo = p.receipts?.[0]?.receiptNumber || '—';
+                        return (
+                            <tr key={p.id} className="hover:bg-slate-50/50">
+                                <td className="px-4 py-3 text-slate-500 font-medium">{formatDate(p.paymentDate)}</td>
+                                <td className="px-4 py-3"><span className="text-slate-700 font-mono text-[10px]">{billNo}</span></td>
+                                <td className="px-4 py-3"><span className="text-slate-900 font-semibold">{p.loanId?.slice(0, 8).toUpperCase()}</span></td>
+                                <td className="px-4 py-3 text-slate-900 font-semibold">{p.loan?.customer?.name || '—'}</td>
+                                <td className="px-4 py-3 text-center text-slate-900 font-bold">{fmtShort(principalPaid)}</td>
+                                <td className="px-4 py-3 text-center text-emerald-600 font-bold">{fmtShort(interestPaid)}</td>
+                                <td className="px-4 py-3 text-center text-slate-900 font-extrabold">{fmtShort(p.amount)}</td>
+                                <td className="px-4 py-3 text-center">
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold">
+                                        {p.creator?.name || 'System'}
+                                    </span>
+                                </td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+        </div>
+    );
+
+    const renderDocChargesSubTable = (list) => (
+        <div className="border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm" style={{ margin: '4px 0 12px 0' }}>
+            <table className="w-full text-xs">
+                <thead>
+                    <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
+                        <th className="px-4 py-2.5 text-left">Date Disbursed</th>
+                        <th className="px-4 py-2.5 text-left">Loan No</th>
+                        <th className="px-4 py-2.5 text-left">Customer</th>
+                        <th className="px-4 py-2.5 text-center">Principal Amount</th>
+                        <th className="px-4 py-2.5 text-center">Document Charges (5%)</th>
+                        <th className="px-4 py-2.5 text-center">Disbursed By</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                    {list.map(l => (
+                        <tr key={l.id} className="hover:bg-slate-50/50">
+                            <td className="px-4 py-3 text-slate-500 font-medium">{formatDate(l.startDate)}</td>
+                            <td className="px-4 py-3"><span className="text-slate-900 font-semibold">{l.id?.slice(0, 8).toUpperCase()}</span></td>
+                            <td className="px-4 py-3 text-slate-900 font-semibold">{l.customer?.name || '—'}</td>
+                            <td className="px-4 py-3 text-center text-slate-900 font-bold">{fmtShort(Number(l.principalAmount))}</td>
+                            <td className="px-4 py-3 text-center text-emerald-600 font-extrabold">{fmtShort(Number(l.documentFee))}</td>
+                            <td className="px-4 py-3 text-center">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold">
+                                    {l.assignedStaff?.name || 'Admin'}
+                                </span>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+
+    const renderLoansGivenSubTable = (list) => (
+        <div className="border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm" style={{ margin: '4px 0 12px 0' }}>
+            <table className="w-full text-xs">
+                <thead>
+                    <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
+                        <th className="px-4 py-2.5 text-left">Date Disbursed</th>
+                        <th className="px-4 py-2.5 text-left">Loan No</th>
+                        <th className="px-4 py-2.5 text-left">Customer</th>
+                        <th className="px-4 py-2.5 text-center">Principal Amount</th>
+                        <th className="px-4 py-2.5 text-center">Disbursed By</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                    {list.map(l => (
+                        <tr key={l.id} className="hover:bg-slate-50/50">
+                            <td className="px-4 py-3 text-slate-500 font-medium">{formatDate(l.startDate)}</td>
+                            <td className="px-4 py-3"><span className="text-slate-900 font-semibold">{l.id?.slice(0, 8).toUpperCase()}</span></td>
+                            <td className="px-4 py-3 text-slate-900 font-semibold">{l.customer?.name || '—'}</td>
+                            <td className="px-4 py-3 text-center text-slate-900 font-bold">{fmtShort(Number(l.principalAmount))}</td>
+                            <td className="px-4 py-3 text-center">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold">
+                                    {l.assignedStaff?.name || 'Admin'}
+                                </span>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+
+    const renderExpensesSubTable = (list) => (
+        <div className="border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm" style={{ margin: '4px 0 12px 0' }}>
+            <table className="w-full text-xs">
+                <thead>
+                    <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
+                        <th className="px-4 py-2.5 text-left">Date</th>
+                        <th className="px-4 py-2.5 text-left">Category</th>
+                        <th className="px-4 py-2.5 text-left">Description</th>
+                        <th className="px-4 py-2.5 text-center">Amount</th>
+                        <th className="px-4 py-2.5 text-center">Recorded By</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                    {list.map(e => (
+                        <tr key={e.id} className="hover:bg-slate-50/50">
+                            <td className="px-4 py-3 text-slate-500 font-medium">{formatDate(e.expenseDate)}</td>
+                            <td className="px-4 py-3"><span className="text-slate-900 font-semibold" style={{ textTransform: 'capitalize' }}>{e.category}</span></td>
+                            <td className="px-4 py-3 text-slate-700 font-medium">{e.description || '—'}</td>
+                            <td className="px-4 py-3 text-center text-red-500 font-bold">{fmtShort(Number(e.amount))}</td>
+                            <td className="px-4 py-3 text-center">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold">
+                                    {e.creator?.name || 'System'}
+                                </span>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
 
     // Calculate sum of principal and interest from allocationDetails
     const getBreakdown = (payment) => {
@@ -685,6 +775,16 @@ export default function Collections() {
                     </button>
                     <button
                         role="tab"
+                        aria-selected={activeTab === 'loans'}
+                        className={`cmd-tab ${activeTab === 'loans' ? 'cmd-tab--active' : ''}`}
+                        onClick={() => setActiveTab('loans')}
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                    >
+                        <Coins size={16} />
+                        Loans Given
+                    </button>
+                    <button
+                        role="tab"
                         aria-selected={activeTab === 'expenses'}
                         className={`cmd-tab ${activeTab === 'expenses' ? 'cmd-tab--active' : ''}`}
                         onClick={() => setActiveTab('expenses')}
@@ -694,6 +794,26 @@ export default function Collections() {
                         Expenses
                     </button>
                 </div>
+
+                {activeTab === 'loans' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                        <div style={{ 
+                            background: '#fef2f2', 
+                            border: '1px solid #fee2e2', 
+                            padding: '6px 14px', 
+                            borderRadius: '10px', 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: '8px',
+                            fontSize: '13px',
+                            fontWeight: 600,
+                            color: 'rgb(239, 68, 68)'
+                        }}>
+                            <span style={{ color: '#ef4444', textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.5px' }}>Total Loans Given:</span>
+                            <span>{fmt(totals.totalLoanAmount)}</span>
+                        </div>
+                    </div>
+                )}
 
                 {activeTab === 'expenses' && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -729,7 +849,7 @@ export default function Collections() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
                     
                     {/* Search bar on left, filters on right */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
                         
                         {/* Search field - Interactive Premium Border */}
                         <div 
@@ -737,7 +857,7 @@ export default function Collections() {
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: '8px',
-                                minWidth: '360px', 
+                                minWidth: '320px', 
                                 height: '38px',
                                 background: '#f1f5f9',
                                 border: '1px solid #cbd5e1',
@@ -784,163 +904,324 @@ export default function Collections() {
                                     setAllPage(1);
                                     setPaymentPage(1);
                                     setLoanPage(1);
-                                    setExpensePage(1);
                                 }}
                             />
                         </div>
 
-                        {/* Quick Select Buttons - Smaller & aligned to right */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            {[
-                                { key: 'all', label: 'All Time' },
-                                { key: 'today', label: 'Today' },
-                                { key: 'week', label: 'This Week' },
-                                { key: 'month', label: 'This Month' },
-                                { key: 'custom', label: 'Custom Range' }
-                            ].map(b => (
-                                <button
-                                    key={b.key}
-                                    className={`quick-date-btn ${dateFilter === b.key ? 'active' : ''}`}
-                                    onClick={() => {
-                                        setDateFilter(b.key);
-                                        setAllPage(1);
-                                        setPaymentPage(1);
-                                        setLoanPage(1);
-                                        setExpensePage(1);
-                                    }}
-                                    style={{
-                                        padding: '6px 12px',
-                                        fontSize: '12px',
-                                        borderRadius: '10px',
-                                        transition: 'all 0.2s ease',
-                                        fontWeight: 500
-                                    }}
-                                >
-                                    {b.label}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+                        {/* Filter Period - Aligned rightmost with evolving Custom Range input */}
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '12px' }}>Filter:</span>
+                            <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-start' }}>
+                                {[
+                                    { key: 'all', label: 'All' },
+                                    { key: 'today', label: 'Today' },
+                                    { key: 'week', label: 'This Week' },
+                                    { key: 'month', label: 'This Month' },
+                                    { key: 'year', label: 'This Year' }
+                                ].map(b => (
+                                    <button
+                                        key={b.key}
+                                        className={`quick-date-btn`}
+                                        onClick={() => {
+                                            setDateFilter(b.key);
+                                            if (b.key === 'today' || b.key === 'week') {
+                                                setAggregationLevel('day');
+                                            } else if (b.key === 'month' && aggregationLevel === 'year') {
+                                                setAggregationLevel('month');
+                                            }
+                                            setExpandedDates({});
+                                            setAllPage(1);
+                                            setPaymentPage(1);
+                                            setLoanPage(1);
+                                            setExpensePage(1);
+                                        }}
+                                        style={{
+                                            padding: '0 10px',
+                                            fontSize: '11px',
+                                            borderRadius: '8px',
+                                            transition: 'all 0.2s ease',
+                                            fontWeight: 600,
+                                            backgroundColor: dateFilter === b.key ? 'var(--slate-900)' : '#ffffff',
+                                            borderColor: dateFilter === b.key ? 'var(--slate-900)' : 'var(--color-border)',
+                                            color: dateFilter === b.key ? '#ffffff' : 'var(--color-text-secondary)',
+                                            marginTop: '7px',
+                                            height: '24px'
+                                        }}
+                                    >
+                                        {b.label}
+                                    </button>
+                                ))}
 
-                    {/* Custom Date Inputs (only when Custom is selected) */}
-                    {dateFilter === 'custom' && (
-                        <div className="form-row animate-fade-in" style={{ marginTop: '0', gap: '16px', justifyContent: 'flex-end' }}>
-                            <div className="form-group" style={{ maxWidth: 180 }}>
-                                <label className="form-label text-xs font-semibold text-slate-500">From Date</label>
-                                <input
-                                    className="form-input"
-                                    type="date"
-                                    value={customFrom}
-                                    onChange={(e) => {
-                                        setCustomFrom(e.target.value);
+                                {/* Separation Divider / Spacer */}
+                                <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--slate-200)', margin: '12px 8px 0 8px' }} />
+
+                                {/* Custom range button that expands / evolves smoothly */}
+                                <div 
+                                    onClick={dateFilter !== 'custom' ? () => {
+                                        setDateFilter('custom');
+                                        setExpandedDates({});
                                         setAllPage(1);
                                         setPaymentPage(1);
                                         setLoanPage(1);
                                         setExpensePage(1);
-                                    }}
-                                    style={{ borderRadius: '10px', border: '1px solid var(--slate-200)', height: '34px', fontSize: '13px' }}
-                                />
-                            </div>
-                            <div className="form-group" style={{ maxWidth: 180 }}>
-                                <label className="form-label text-xs font-semibold text-slate-500">To Date</label>
-                                <input
-                                    className="form-input"
-                                    type="date"
-                                    value={customTo}
-                                    onChange={(e) => {
-                                        setCustomTo(e.target.value);
-                                        setAllPage(1);
-                                        setPaymentPage(1);
-                                        setLoanPage(1);
-                                        setExpensePage(1);
-                                    }}
-                                    style={{ borderRadius: '10px', border: '1px solid var(--slate-200)', height: '34px', fontSize: '13px' }}
-                                />
-                            </div>
-                        </div>
-                    )}
-                    {/* Opening Cash Input */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'flex-start', borderTop: '1px dashed #e2e8f0', paddingTop: '12px', marginTop: '4px', flexWrap: 'wrap' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>Opening Cash in Hand:</span>
-                            <div style={{ position: 'relative', display: 'inline-block' }}>
-                                <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '13px', color: '#64748b', fontWeight: 500 }}>₹</span>
-                                <input
-                                    type="number"
-                                    className="form-input"
-                                    value={openingCashInHand}
-                                    onChange={(e) => handleOpeningCashChange(Number(e.target.value))}
+                                    } : undefined}
                                     style={{
-                                        paddingLeft: '24px',
-                                        width: '180px',
-                                        height: '34px',
+                                        position: 'relative',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        padding: '0 8px',
+                                        fontSize: '11px',
                                         borderRadius: '8px',
-                                        fontSize: '13px',
-                                        border: '1px solid #cbd5e1',
-                                        outline: 'none',
+                                        border: dateFilter === 'custom' ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid var(--color-border)',
+                                        backgroundColor: dateFilter === 'custom' ? 'var(--slate-900)' : '#ffffff',
+                                        color: dateFilter === 'custom' ? '#ffffff' : 'var(--color-text-secondary)',
                                         fontWeight: 600,
-                                        color: '#0f172a'
+                                        cursor: dateFilter === 'custom' ? 'default' : 'pointer',
+                                        transition: 'max-width 0.4s cubic-bezier(0.25, 1, 0.5, 1), height 0.4s cubic-bezier(0.25, 1, 0.5, 1), background-color 0.3s ease, border-color 0.3s ease',
+                                        maxWidth: dateFilter === 'custom' ? '180px' : '110px',
+                                        height: dateFilter === 'custom' ? '54px' : '24px',
+                                        overflow: 'hidden',
+                                        boxSizing: 'border-box',
+                                        whiteSpace: 'nowrap',
+                                        margin: '7px 0 0 0'
                                     }}
-                                />
+                                    className={dateFilter !== 'custom' ? 'quick-date-btn' : ''}
+                                >
+                                    {/* Text State: Fades and slides out to the left */}
+                                    <span style={{
+                                        display: 'block',
+                                        opacity: dateFilter === 'custom' ? 0 : 1,
+                                        transform: dateFilter === 'custom' ? 'translateX(-20px)' : 'translateX(0)',
+                                        transition: 'opacity 0.25s ease, transform 0.3s cubic-bezier(0.25, 1, 0.5, 1)',
+                                        pointerEvents: dateFilter === 'custom' ? 'none' : 'auto',
+                                        position: dateFilter === 'custom' ? 'absolute' : 'static',
+                                        whiteSpace: 'nowrap'
+                                    }}>
+                                        Custom Range
+                                    </span>
+
+                                    {/* Inputs State: Fades and slides in from the right - stacked vertically */}
+                                    <div style={{ 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        gap: '6px',
+                                        opacity: dateFilter === 'custom' ? 1 : 0,
+                                        transform: dateFilter === 'custom' ? 'translateX(0)' : 'translateX(20px)',
+                                        transition: 'opacity 0.25s ease 0.1s, transform 0.35s cubic-bezier(0.25, 1, 0.5, 1)',
+                                        pointerEvents: dateFilter === 'custom' ? 'auto' : 'none',
+                                        position: dateFilter === 'custom' ? 'static' : 'absolute'
+                                    }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'space-between' }}>
+                                                <span style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)', textTransform: 'uppercase', fontWeight: 700, minWidth: '32px' }}>From</span>
+                                                <input
+                                                    type="date"
+                                                    value={customFrom}
+                                                    onChange={(e) => {
+                                                        setCustomFrom(e.target.value);
+                                                        setAllPage(1);
+                                                        setPaymentPage(1);
+                                                        setLoanPage(1);
+                                                        setExpensePage(1);
+                                                    }}
+                                                    onClick={(e) => {
+                                                        try { e.target.showPicker(); } catch (err) {}
+                                                    }}
+                                                    style={{
+                                                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                                                        outline: 'none',
+                                                        backgroundColor: 'rgba(255, 255, 255, 0.15)', // slightly lighter translucent background
+                                                        borderRadius: '6px',
+                                                        fontSize: '11px',
+                                                        padding: '0 6px',
+                                                        color: '#ffffff',
+                                                        colorScheme: 'dark',
+                                                        width: '108px',
+                                                        height: '18px',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                />
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'space-between' }}>
+                                                <span style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)', textTransform: 'uppercase', fontWeight: 700, minWidth: '32px' }}>To</span>
+                                                <input
+                                                    type="date"
+                                                    value={customTo}
+                                                    onChange={(e) => {
+                                                        setCustomTo(e.target.value);
+                                                        setAllPage(1);
+                                                        setPaymentPage(1);
+                                                        setLoanPage(1);
+                                                        setExpensePage(1);
+                                                    }}
+                                                    onClick={(e) => {
+                                                        try { e.target.showPicker(); } catch (err) {}
+                                                    }}
+                                                    style={{
+                                                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                                                        outline: 'none',
+                                                        backgroundColor: 'rgba(255, 255, 255, 0.15)', // slightly lighter translucent background
+                                                        borderRadius: '6px',
+                                                        fontSize: '11px',
+                                                        padding: '0 6px',
+                                                        color: '#ffffff',
+                                                        colorScheme: 'dark',
+                                                        width: '108px',
+                                                        height: '18px',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                />
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setDateFilter('month'); // reset to Month
+                                                setExpandedDates({});
+                                                setAllPage(1);
+                                                setPaymentPage(1);
+                                                setLoanPage(1);
+                                                setExpensePage(1);
+                                            }}
+                                            style={{
+                                                background: 'none',
+                                                border: 'none',
+                                                color: 'rgba(255, 255, 255, 0.6)',
+                                                cursor: 'pointer',
+                                                padding: 0,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                marginLeft: '2px',
+                                                transition: 'color 0.2s'
+                                            }}
+                                            onMouseEnter={(e) => e.currentTarget.style.color = '#ffffff'}
+                                            onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.6)'}
+                                            title="Clear custom range"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <span style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>
-                            * This starting balance is used to compute daily opening and closing running cash levels in the ledger.
-                        </span>
                     </div>
                 </div>
-            </div>
-
-            {/* Summary Cards */}
-            <div className="cmd-grid-3" style={{ marginBottom: 'var(--space-6)' }}>
+            </div>            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px', marginBottom: '12px' }}>
                 {activeTab === 'all' ? (
                     <>
-                        <div className="progress-card">
-                            <div className="progress-card__icon-circle progress-card__icon-circle--emerald">
-                                <Wallet size={24} />
+                        {/* Collections & Doc Charges (Green Group) */}
+                        <div style={{
+                            display: 'flex',
+                            gap: '16px',
+                            padding: '12px 16px',
+                            backgroundColor: '#f0fdf4',
+                            border: '2px solid #bbf7d0',
+                            borderRadius: '12px',
+                            gridColumn: 'span 2',
+                            minWidth: '0'
+                        }}>
+                            <div className="progress-card" style={{ background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, flex: 1, minWidth: '0' }}>
+                                <div className="progress-card__icon-circle progress-card__icon-circle--emerald" style={{ background: '#ffffff' }}>
+                                    <Wallet size={20} />
+                                </div>
+                                <div className="progress-card__body">
+                                    <span className="progress-card__title" style={{ color: '#166534' }}>Collections (EMI)</span>
+                                    <div className="progress-card__values">
+                                        <span className="progress-card__actual" style={{ color: '#15803d', fontSize: '18px' }}>
+                                            {fmt(totals.totalAmount)}
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
-                            <div className="progress-card__body">
-                                <span className="progress-card__title">Total Inflow</span>
-                                <div className="progress-card__values">
-                                    <span className="progress-card__actual" style={{ color: 'var(--color-success)' }}>
-                                        {fmt(totals.totalAmount + totals.totalDocCharges)}
-                                    </span>
+
+                            <div style={{ width: '1px', alignSelf: 'stretch', backgroundColor: '#bbf7d0' }} />
+
+                            <div className="progress-card" style={{ background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, flex: 1, minWidth: '0' }}>
+                                <div className="progress-card__icon-circle progress-card__icon-circle--emerald" style={{ background: '#ffffff' }}>
+                                    <Receipt size={20} />
+                                </div>
+                                <div className="progress-card__body">
+                                    <span className="progress-card__title" style={{ color: '#166534' }}>Doc Charges</span>
+                                    <div className="progress-card__values">
+                                        <span className="progress-card__actual" style={{ color: '#15803d', fontSize: '18px' }}>
+                                            {fmt(totals.totalDocCharges)}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="progress-card">
-                            <div className="progress-card__icon-circle progress-card__icon-circle--rose" style={{ background: '#fef2f2', color: '#ef4444' }}>
-                                <ArrowDownCircle size={24} />
+                        {/* Outflows / Expenses & Principal Disbursed (Red/Rose Group) */}
+                        <div style={{
+                            display: 'flex',
+                            gap: '16px',
+                            padding: '12px 16px',
+                            backgroundColor: '#fef2f2',
+                            border: '2px solid #fecaca',
+                            borderRadius: '12px',
+                            gridColumn: 'span 2',
+                            minWidth: '0'
+                        }}>
+                            <div className="progress-card" style={{ background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, flex: 1, minWidth: '0' }}>
+                                <div className="progress-card__icon-circle progress-card__icon-circle--rose" style={{ background: '#ffffff', color: '#ef4444' }}>
+                                    <ArrowDownCircle size={20} />
+                                </div>
+                                <div className="progress-card__body">
+                                    <span className="progress-card__title" style={{ color: '#991b1b' }}>Expenses</span>
+                                    <div className="progress-card__values">
+                                        <span className="progress-card__actual" style={{ color: '#b91c1c', fontSize: '18px' }}>
+                                            {fmt(totals.totalExpenseAmt)}
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
-                            <div className="progress-card__body">
-                                <span className="progress-card__title">Total Outflow</span>
-                                <div className="progress-card__values">
-                                    <span className="progress-card__actual" style={{ color: '#ef4444' }}>
-                                        {fmt(totals.totalExpenseAmt + totals.totalLoanAmount)}
-                                    </span>
+
+                            <div style={{ width: '1px', alignSelf: 'stretch', backgroundColor: '#fecaca' }} />
+
+                            <div className="progress-card" style={{ background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, flex: 1, minWidth: '0' }}>
+                                <div className="progress-card__icon-circle progress-card__icon-circle--rose" style={{ background: '#ffffff', color: '#ef4444' }}>
+                                    <Landmark size={20} />
+                                </div>
+                                <div className="progress-card__body">
+                                    <span className="progress-card__title" style={{ color: '#991b1b' }}>Principal Disbursed</span>
+                                    <div className="progress-card__values">
+                                        <span className="progress-card__actual" style={{ color: '#b91c1c', fontSize: '18px' }}>
+                                            {fmt(totals.totalLoanAmount)}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="progress-card">
+                        {/* Net Cash Flow (Neutral Slate Group) */}
+                        <div style={{
+                            display: 'flex',
+                            padding: '12px 16px',
+                            backgroundColor: '#f8fafc',
+                            border: '2px solid #cbd5e1',
+                            borderRadius: '12px',
+                            gridColumn: 'span 1',
+                            minWidth: '0'
+                        }}>
                             {(() => {
                                 const netFlow = (totals.totalAmount + totals.totalDocCharges) - (totals.totalExpenseAmt + totals.totalLoanAmount);
                                 const isPositive = netFlow >= 0;
                                 return (
-                                    <>
-                                        <div className={`progress-card__icon-circle ${isPositive ? 'progress-card__icon-circle--emerald' : 'progress-card__icon-circle--rose'}`} style={!isPositive ? { background: '#fef2f2', color: '#ef4444' } : undefined}>
-                                            <Landmark size={24} />
+                                    <div className="progress-card" style={{ background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, flex: 1, minWidth: '0' }}>
+                                        <div className="progress-card__icon-circle" style={{ background: '#ffffff', color: isPositive ? '#10b981' : '#ef4444' }}>
+                                            <TrendingUp size={20} />
                                         </div>
                                         <div className="progress-card__body">
-                                            <span className="progress-card__title">Net Cash Flow</span>
+                                            <span className="progress-card__title" style={{ color: '#475569' }}>Net Cash Flow</span>
                                             <div className="progress-card__values">
-                                                <span className="progress-card__actual" style={{ color: isPositive ? 'var(--color-success)' : '#ef4444' }}>
+                                                <span className="progress-card__actual" style={{ color: isPositive ? '#10b981' : '#ef4444', fontSize: '18px' }}>
                                                     {fmt(netFlow)}
                                                 </span>
                                             </div>
                                         </div>
-                                    </>
+                                    </div>
                                 );
                             })()}
                         </div>
@@ -1081,29 +1362,74 @@ export default function Collections() {
             </div>
 
             {/* Content Tables */}
-            {activeTab === 'all' ? (
-                <div className="card p-0" style={{ overflow: 'hidden', border: '1px solid var(--slate-200)' }}>
+            <div className="card p-0" style={{ paddingTop: '10px', overflow: 'hidden', border: '1px solid var(--slate-200)' }}>
+                {/* Group selector inside table card header - aligned rightmost */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '10px 20px', background: 'transparent' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Group:</span>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                            {[
+                                { key: 'day', label: 'Day', allowedFor: ['all', 'today', 'week', 'month', 'year', 'custom'] },
+                                { key: 'week', label: 'Week', allowedFor: ['all', 'week', 'month', 'year', 'custom'] },
+                                { key: 'month', label: 'Month', allowedFor: ['all', 'month', 'year', 'custom'] },
+                                { key: 'year', label: 'Year', allowedFor: ['all', 'year', 'custom'] }
+                            ].map(b => {
+                                const isAllowed = b.allowedFor.includes(dateFilter);
+                                return (
+                                    <button
+                                        key={b.key}
+                                        disabled={!isAllowed}
+                                        className={`quick-date-btn`}
+                                        onClick={() => {
+                                            setAggregationLevel(b.key);
+                                            setExpandedDates({});
+                                            setAllPage(1);
+                                            setPaymentPage(1);
+                                            setLoanPage(1);
+                                            setLoansGivenPage(1);
+                                            setExpensePage(1);
+                                        }}
+                                        style={{
+                                            padding: '4px 10px',
+                                            fontSize: '11px',
+                                            borderRadius: '6px',
+                                            transition: 'all 0.2s ease',
+                                            fontWeight: 600,
+                                            opacity: isAllowed ? 1 : 0.4,
+                                            cursor: isAllowed ? 'pointer' : 'not-allowed',
+                                            backgroundColor: aggregationLevel === b.key ? 'var(--slate-900)' : '#ffffff',
+                                            borderColor: aggregationLevel === b.key ? 'var(--slate-900)' : 'var(--color-border)',
+                                            color: aggregationLevel === b.key ? '#ffffff' : 'var(--color-text-secondary)'
+                                        }}
+                                        title={!isAllowed ? `Cannot aggregate by ${b.key} with ${dateFilter} filter active` : undefined}
+                                    >
+                                        {b.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+
+                {activeTab === 'all' ? (
                     <div className="table-container p-0 border-0 shadow-none">
                         <table className="w-full text-sm">
                             <thead>
-                                <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                                <tr className="border-b border-slate-200 text-xs font-semibold text-slate-400 uppercase tracking-wider">
                                     <th className="px-4 py-4 text-center" style={{ width: '60px' }}></th>
-                                    <th className="px-6 py-4 text-left">Date</th>
-                                    <th className="px-6 py-4 text-right">Opening Cash</th>
-                                    <th className="px-6 py-4 text-right" style={{ backgroundColor: '#ecfdf5', color: '#047857' }}>Collection (+)</th>
-                                    <th className="px-6 py-4 text-right" style={{ backgroundColor: '#ecfdf5', color: '#047857' }}>Doc Charges (+)</th>
-                                    <th className="px-6 py-4 text-right" style={{ backgroundColor: '#fef2f2', color: '#b91c1c' }}>Expenses (-)</th>
-                                    <th className="px-6 py-4 text-right" style={{ backgroundColor: '#fef2f2', color: '#b91c1c' }}>Total Given (-)</th>
-                                    <th className="px-6 py-4 text-right" style={{ backgroundColor: '#d1fae5', color: '#064e3b' }}>Daily Inflow (+)</th>
-                                    <th className="px-6 py-4 text-right" style={{ backgroundColor: '#fee2e2', color: '#7f1d1d' }}>Daily Outflow (-)</th>
-                                    <th className="px-6 py-4 text-right">Daily Tally</th>
-                                    <th className="px-6 py-4 text-right">Closing Cash</th>
+                                    <th className="px-6 py-4 text-left text-slate-500 font-medium normal-case">
+                                        {dateFilter === 'month' ? 'Month' : dateFilter === 'year' ? 'Year' : 'Date'}
+                                    </th>
+                                    <th className="px-6 py-4 text-right text-slate-500 font-medium normal-case">Opening Cash</th>
+                                    <th className="px-6 py-4 text-right text-slate-500 font-medium normal-case">Total Inflow (+)</th>
+                                    <th className="px-6 py-4 text-right text-slate-500 font-medium normal-case">Total Outflow (-)</th>
+                                    <th className="px-6 py-4 text-right text-slate-500 font-medium normal-case">Closing Cash</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {pagedDateGroups.length === 0 ? (
                                     <tr>
-                                        <td colSpan={11}>
+                                        <td colSpan={6}>
                                             <div className="empty-state-inline" style={{ padding: 'var(--space-8) 0' }}>
                                                 <div className="empty-icon" style={{ display: 'inline-flex', padding: '12px', background: 'var(--slate-100)', borderRadius: '50%', color: 'var(--slate-400)', marginBottom: '12px' }}>
                                                     <Landmark size={24} />
@@ -1118,6 +1444,205 @@ export default function Collections() {
                                 ) : (
                                     pagedDateGroups.map((g) => {
                                         const isExpanded = !!expandedDates[g.date];
+                                        
+                                        const renderGroupLabel = (key) => {
+                                            if (aggregationLevel === 'year') {
+                                                return key;
+                                            }
+                                            if (aggregationLevel === 'month') {
+                                                const [year, monthStr] = key.split('-');
+                                                const date = new Date(Number(year), Number(monthStr) - 1, 1);
+                                                return date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+                                            }
+                                            if (aggregationLevel === 'week') {
+                                                return `Week ${key.split('-W')[1]} (${key.split('-W')[0]})`;
+                                            }
+                                            return formatDate(key);
+                                        };
+
+                                        // Drill-down renderer for sub-aggregations (e.g. Year aggregates drill down to Months, Month drills down to Days/Weeks)
+                                        const renderDrillDownContent = (group) => {
+                                            if (aggregationLevel === 'year') {
+                                                // Group transactions inside this year by month
+                                                const subGroups = {};
+                                                group.payments.forEach(p => {
+                                                    const k = getLocalDateString(p.paymentDate).substring(0, 7); // YYYY-MM
+                                                    if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [] };
+                                                    subGroups[k].payments.push(p);
+                                                });
+                                                group.loans.forEach(l => {
+                                                    const k = getLocalDateString(l.startDate).substring(0, 7);
+                                                    if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [] };
+                                                    subGroups[k].loans.push(l);
+                                                });
+                                                group.expenses.forEach(e => {
+                                                    const k = getLocalDateString(e.expenseDate).substring(0, 7);
+                                                    if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [] };
+                                                    subGroups[k].expenses.push(e);
+                                                });
+
+                                                const subList = Object.keys(subGroups).map(k => buildGroupNode(k, subGroups[k].payments, subGroups[k].loans, subGroups[k].expenses)).sort((a,b) => b.date.localeCompare(a.date));
+
+                                                return (
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '4px' }}>Months in {group.date}</span>
+                                                        <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden bg-white">
+                                                            {subList.map(sg => {
+                                                                const isSubExpanded = !!expandedDates[`${group.date}-${sg.date}`];
+                                                                const monthName = new Date(Number(sg.date.split('-')[0]), Number(sg.date.split('-')[1]) - 1, 1).toLocaleDateString('en-GB', { month: 'long' });
+                                                                return (
+                                                                    <div key={sg.date} style={{ padding: '10px 16px' }}>
+                                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                                            <button 
+                                                                                onClick={() => setExpandedDates(prev => ({ ...prev, [`${group.date}-${sg.date}`]: !isSubExpanded }))}
+                                                                                style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'none', border: 'none', color: '#1e293b', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}
+                                                                            >
+                                                                                {isSubExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                                                                {monthName}
+                                                                            </button>
+                                                                            <div style={{ display: 'flex', gap: '16px', fontSize: '12px', fontWeight: 500 }}>
+                                                                                <span style={{ color: '#10b981' }}>Inflow: {fmt(sg.inflow)}</span>
+                                                                                <span style={{ color: '#ef4444' }}>Outflow: {fmt(sg.outflow)}</span>
+                                                                            </div>
+                                                                        </div>
+                                                                        {isSubExpanded && (
+                                                                            <div style={{ marginTop: '10px', paddingLeft: '24px' }}>
+                                                                                {renderDaysList(sg)}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+
+                                            if (aggregationLevel === 'month') {
+                                                return renderDaysList(group);
+                                            }
+
+                                            // Default: Day/Week aggregations just display the transactions directly
+                                            return renderTransactionsTable(group);
+                                        };
+
+                                        const renderDaysList = (group) => {
+                                            const subGroups = {};
+                                            group.payments.forEach(p => {
+                                                const k = getLocalDateString(p.paymentDate);
+                                                if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [] };
+                                                subGroups[k].payments.push(p);
+                                            });
+                                            group.loans.forEach(l => {
+                                                const k = getLocalDateString(l.startDate);
+                                                if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [] };
+                                                subGroups[k].loans.push(l);
+                                            });
+                                            group.expenses.forEach(e => {
+                                                const k = getLocalDateString(e.expenseDate);
+                                                if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [] };
+                                                subGroups[k].expenses.push(e);
+                                            });
+
+                                            const subList = Object.keys(subGroups).map(k => buildGroupNode(k, subGroups[k].payments, subGroups[k].loans, subGroups[k].expenses)).sort((a,b) => b.date.localeCompare(a.date));
+
+                                            return (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '4px' }}>Daily Breakdown</span>
+                                                    <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden bg-white">
+                                                        {subList.map(sg => {
+                                                            const isSubExpanded = !!expandedDates[sg.date];
+                                                            return (
+                                                                <div key={sg.date} style={{ padding: '10px 16px' }}>
+                                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                                        <button 
+                                                                            onClick={() => setExpandedDates(prev => ({ ...prev, [sg.date]: !isSubExpanded }))}
+                                                                            style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'none', border: 'none', color: '#1e293b', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+                                                                        >
+                                                                            {isSubExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                                                            {formatDate(sg.date)}
+                                                                        </button>
+                                                                        <div style={{ display: 'flex', gap: '16px', fontSize: '11px', fontWeight: 500 }}>
+                                                                            <span style={{ color: '#10b981' }}>+ {fmt(sg.inflow)}</span>
+                                                                            <span style={{ color: '#ef4444' }}>- {fmt(sg.outflow)}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    {isSubExpanded && (
+                                                                        <div style={{ marginTop: '10px' }}>
+                                                                            {renderTransactionsTable(sg)}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            );
+                                        };
+
+                                        const renderTransactionsTable = (group) => {
+                                            const txs = getDetailedTxListForDate(group);
+                                            return (
+                                                <div className="border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm" style={{ margin: '4px 0 12px 0' }}>
+                                                    <div className="bg-slate-50 px-4 py-2 border-b border-slate-200 flex items-center justify-between">
+                                                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Transaction Details for {renderGroupLabel(group.date)}</span>
+                                                        <span className="text-[11px] font-semibold text-slate-500">Total Entries: {txs.length}</span>
+                                                    </div>
+                                                    <table className="w-full text-xs">
+                                                        <thead>
+                                                            <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
+                                                                <th className="px-4 py-2.5 text-left">Time</th>
+                                                                <th className="px-4 py-2.5 text-left">Type</th>
+                                                                <th className="px-4 py-2.5 text-left">Particulars / Details</th>
+                                                                <th className="px-4 py-2.5 text-left">Customer</th>
+                                                                <th className="px-4 py-2.5 text-right">Inflow (+)</th>
+                                                                <th className="px-4 py-2.5 text-right">Outflow (-)</th>
+                                                                <th className="px-4 py-2.5 text-center">Recorded By</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-slate-100">
+                                                            {txs.map(dtx => (
+                                                                <tr key={dtx.id} className="hover:bg-slate-50/50">
+                                                                    <td className="px-4 py-3 text-slate-500 font-medium">{dtx.time}</td>
+                                                                    <td className="px-4 py-3">
+                                                                        <span className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase border ${dtx.typeClass}`}>
+                                                                            {dtx.type}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-4 py-3 text-slate-700">
+                                                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                                            <span style={{ fontWeight: 600, color: 'var(--slate-900)' }}>{dtx.title}</span>
+                                                                            <span className="text-[11px] text-slate-400 font-medium">{dtx.details}</span>
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="px-4 py-3 text-slate-900 font-semibold">{dtx.customer}</td>
+                                                                    <td className="px-4 py-3 text-right">
+                                                                        {dtx.inflow > 0 ? (
+                                                                            <span className="text-emerald-500 font-extrabold">{fmt(dtx.inflow)}</span>
+                                                                        ) : (
+                                                                            <span className="text-slate-300 font-mono">—</span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-4 py-3 text-right">
+                                                                        {dtx.outflow > 0 ? (
+                                                                            <span className="text-red-400 font-extrabold">{fmt(dtx.outflow)}</span>
+                                                                        ) : (
+                                                                            <span className="text-slate-300 font-mono">—</span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-4 py-3 text-center">
+                                                                        <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold">
+                                                                            {dtx.creator}
+                                                                        </span>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            );
+                                        };
+
                                         return (
                                             <React.Fragment key={g.date}>
                                                 <tr className="hover-table-row font-medium">
@@ -1141,80 +1666,37 @@ export default function Collections() {
                                                             {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                                                         </button>
                                                     </td>
-                                                    <td className="px-6 py-4 text-left text-slate-900 font-semibold">{formatDate(g.date)}</td>
+                                                    <td className="px-6 py-4 text-left text-slate-900 font-semibold">{renderGroupLabel(g.date)}</td>
                                                     <td className="px-6 py-4 text-right text-slate-500 font-medium">{fmt(g.openingBalance)}</td>
-                                                    <td className="px-6 py-4 text-right text-emerald-600 font-semibold" style={{ backgroundColor: '#ecfdf5' }}>{g.collection > 0 ? fmt(g.collection) : '—'}</td>
-                                                    <td className="px-6 py-4 text-right text-emerald-600 font-semibold" style={{ backgroundColor: '#ecfdf5' }}>{g.docCharges > 0 ? fmt(g.docCharges) : '—'}</td>
-                                                    <td className="px-6 py-4 text-right text-red-500 font-semibold" style={{ backgroundColor: '#fef2f2' }}>{g.expensesAmt > 0 ? fmt(g.expensesAmt) : '—'}</td>
-                                                    <td className="px-6 py-4 text-right text-red-500 font-semibold" style={{ backgroundColor: '#fef2f2' }}>{g.given > 0 ? fmt(g.given) : '—'}</td>
-                                                    <td className="px-6 py-4 text-right text-emerald-900 font-extrabold" style={{ fontSize: '13.5px', backgroundColor: '#d1fae5' }}>{g.inflow > 0 ? fmt(g.inflow) : '—'}</td>
-                                                    <td className="px-6 py-4 text-right text-red-900 font-extrabold" style={{ fontSize: '13.5px', backgroundColor: '#fee2e2' }}>{g.outflow > 0 ? fmt(g.outflow) : '—'}</td>
-                                                    <td className="px-6 py-4 text-right" style={{ fontSize: '13.5px', backgroundColor: g.tally >= 0 ? '#ecfdf5' : '#fef2f2' }}>
-                                                        <span className={g.tally >= 0 ? "text-emerald-950 font-extrabold" : "text-red-950 font-extrabold"}>
-                                                            {g.tally >= 0 ? `+${fmt(g.tally)}` : fmt(g.tally)}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-6 py-4 text-right text-slate-900 font-bold" style={{ fontSize: '13.5px' }}>{fmt(g.closingBalance)}</td>
+                                                    <td className="px-6 py-4 text-right text-emerald-500 font-extrabold" style={{ color: '#10b981' }}>{g.inflow > 0 ? fmt(g.inflow) : '—'}</td>
+                                                    <td className="px-6 py-4 text-right text-red-500 font-extrabold" style={{ color: '#ef4444' }}>{g.outflow > 0 ? fmt(g.outflow) : '—'}</td>
+                                                    <td className="px-6 py-4 text-right text-slate-900 font-bold">{fmt(g.closingBalance)}</td>
                                                 </tr>
                                                 {isExpanded && (
-                                                    <tr className="bg-slate-50/50">
-                                                        <td colSpan={11} className="px-6 py-3">
-                                                            <div className="border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm" style={{ margin: '4px 0 12px 0' }}>
-                                                                <div className="bg-slate-50 px-4 py-2 border-b border-slate-200 flex items-center justify-between">
-                                                                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Transaction Details for {formatDate(g.date)}</span>
-                                                                    <span className="text-[11px] font-semibold text-slate-500">Total Entries: {getDetailedTxListForDate(g).length}</span>
+                                                    <tr className="bg-slate-50/30">
+                                                        <td colSpan={6} className="px-6 py-4">
+                                                            {/* Granular Math Summary Grid */}
+                                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '16px' }}>
+                                                                <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)' }}>
+                                                                    <span style={{ fontSize: '10px', fontWeight: 600, color: '#64748b', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Collections</span>
+                                                                    <span style={{ fontSize: '15px', fontWeight: 700, color: '#10b981' }}>{fmt(g.collection)}</span>
                                                                 </div>
-                                                                <table className="w-full text-xs">
-                                                                    <thead>
-                                                                        <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
-                                                                            <th className="px-4 py-2.5 text-left">Time</th>
-                                                                            <th className="px-4 py-2.5 text-left">Type</th>
-                                                                            <th className="px-4 py-2.5 text-left">Particulars / Details</th>
-                                                                            <th className="px-4 py-2.5 text-left">Customer</th>
-                                                                            <th className="px-4 py-2.5 text-right">Inflow (+)</th>
-                                                                            <th className="px-4 py-2.5 text-right">Outflow (-)</th>
-                                                                            <th className="px-4 py-2.5 text-center">Recorded By</th>
-                                                                        </tr>
-                                                                    </thead>
-                                                                    <tbody className="divide-y divide-slate-100">
-                                                                        {getDetailedTxListForDate(g).map(dtx => (
-                                                                            <tr key={dtx.id} className="hover:bg-slate-50/50">
-                                                                                <td className="px-4 py-3 text-slate-500 font-medium">{dtx.time}</td>
-                                                                                <td className="px-4 py-3">
-                                                                                    <span className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase border ${dtx.typeClass}`}>
-                                                                                        {dtx.type}
-                                                                                    </span>
-                                                                                </td>
-                                                                                <td className="px-4 py-3 text-slate-700">
-                                                                                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                                                        <span style={{ fontWeight: 600, color: 'var(--slate-900)' }}>{dtx.title}</span>
-                                                                                        <span className="text-[11px] text-slate-400 font-medium">{dtx.details}</span>
-                                                                                    </div>
-                                                                                </td>
-                                                                                <td className="px-4 py-3 text-slate-900 font-semibold">{dtx.customer}</td>
-                                                                                <td className="px-4 py-3 text-right">
-                                                                                    {dtx.inflow > 0 ? (
-                                                                                        <span className="text-emerald-500 font-extrabold">{fmt(dtx.inflow)}</span>
-                                                                                    ) : (
-                                                                                        <span className="text-slate-300 font-mono">—</span>
-                                                                                    )}
-                                                                                </td>
-                                                                                <td className="px-4 py-3 text-right">
-                                                                                    {dtx.outflow > 0 ? (
-                                                                                        <span className="text-red-400 font-extrabold">{fmt(dtx.outflow)}</span>
-                                                                                    ) : (
-                                                                                        <span className="text-slate-300 font-mono">—</span>
-                                                                                    )}
-                                                                                </td>
-                                                                                <td className="px-4 py-3 text-center">
-                                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold">
-                                                                                        {dtx.creator}
-                                                                                    </span>
-                                                                                </td>
-                                                                            </tr>
-                                                                        ))}
-                                                                    </tbody>
-                                                                </table>
+                                                                <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)' }}>
+                                                                    <span style={{ fontSize: '10px', fontWeight: 600, color: '#64748b', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Doc Charges</span>
+                                                                    <span style={{ fontSize: '15px', fontWeight: 700, color: '#10b981' }}>{fmt(g.docCharges)}</span>
+                                                                </div>
+                                                                <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)' }}>
+                                                                    <span style={{ fontSize: '10px', fontWeight: 600, color: '#64748b', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Expenses</span>
+                                                                    <span style={{ fontSize: '15px', fontWeight: 700, color: '#ef4444' }}>{fmt(g.expensesAmt)}</span>
+                                                                </div>
+                                                                <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)' }}>
+                                                                    <span style={{ fontSize: '10px', fontWeight: 600, color: '#64748b', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Total Given</span>
+                                                                    <span style={{ fontSize: '15px', fontWeight: 700, color: '#ef4444' }}>{fmt(g.given)}</span>
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            <div style={{ marginTop: '12px' }}>
+                                                                {renderDrillDownContent(g)}
                                                             </div>
                                                         </td>
                                                     </tr>
@@ -1226,139 +1708,139 @@ export default function Collections() {
                             </tbody>
                         </table>
                     </div>
-
-                    {filteredDateGroups.length > 0 && (
-                        <div className="table-pagination" style={{ padding: 'var(--space-4) var(--space-6)', borderTop: '1px solid var(--slate-100)' }}>
-                            <div className="pagination-info text-sm text-slate-500 font-medium">
-                                Showing {startIdx} to {endIdx} of {filteredDateGroups.length} entries
-                            </div>
-                            <div className="pagination-btns flex gap-1">
-                                <button
-                                    disabled={allPage === 1}
-                                    onClick={() => setAllPage(allPage - 1)}
-                                    className="btn btn-sm btn-secondary"
-                                    style={{ padding: '4px 10px' }}
-                                >
-                                    <ChevronLeft size={14} /> Prev
-                                </button>
-                                {[...Array(totalAllPages)].map((_, i) => (
-                                    <button
-                                        key={i + 1}
-                                        className={`btn btn-sm ${allPage === i + 1 ? 'btn-primary' : 'btn-secondary'}`}
-                                        onClick={() => setAllPage(i + 1)}
-                                        style={{ minWidth: '32px', padding: '4px' }}
-                                    >
-                                        {i + 1}
-                                    </button>
-                                )).slice(0, 5)}
-                                <button
-                                    disabled={allPage >= totalAllPages}
-                                    onClick={() => setAllPage(allPage + 1)}
-                                    className="btn btn-sm btn-secondary"
-                                    style={{ padding: '4px 10px' }}
-                                >
-                                    Next <ChevronRight size={14} />
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            ) : activeTab === 'payments' ? (
-                <div className="card p-0" style={{ overflow: 'hidden', border: '1px solid var(--slate-200)' }}>
+                ) : (
                     <div className="table-container p-0 border-0 shadow-none">
                         <table className="w-full text-sm">
                             <thead>
-                                <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                                    <th className="px-6 py-4 text-left">Date</th>
-                                    <th className="px-6 py-4 text-left">Bill No</th>
-                                    <th className="px-6 py-4 text-left">Loan No</th>
-                                    <th className="px-6 py-4 text-left">Customer</th>
-                                    <th className="px-6 py-4 text-center">Principal Paid</th>
-                                    <th className="px-6 py-4 text-center">Interest Paid</th>
-                                    <th className="px-6 py-4 text-center">Total Paid</th>
-                                    <th className="px-6 py-4 text-center">Collected By</th>
+                                <tr className="border-b border-slate-200 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                                    <th className="px-4 py-4 text-center" style={{ width: '60px' }}></th>
+                                    <th className="px-6 py-4 text-left text-slate-500 font-medium normal-case">Period</th>
+                                    <th className="px-6 py-4 text-center text-slate-500 font-medium normal-case">Count</th>
+                                    <th className="px-6 py-4 text-right text-slate-500 font-medium normal-case">Total Amount</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {pagedPayments.length === 0 ? (
+                                {pagedTabGroups.length === 0 ? (
                                     <tr>
-                                        <td colSpan={8}>
+                                        <td colSpan={4}>
                                             <div className="empty-state-inline" style={{ padding: 'var(--space-8) 0' }}>
                                                 <div className="empty-icon" style={{ display: 'inline-flex', padding: '12px', background: 'var(--slate-100)', borderRadius: '50%', color: 'var(--slate-400)', marginBottom: '12px' }}>
-                                                    <Wallet size={24} />
+                                                    <Hash size={24} />
                                                 </div>
-                                                <div className="empty-title" style={{ fontWeight: 600, color: 'var(--slate-800)', fontSize: '15px' }}>No payments found</div>
+                                                <div className="empty-title" style={{ fontWeight: 600, color: 'var(--slate-800)', fontSize: '15px' }}>No transactions found</div>
                                                 <div className="empty-desc" style={{ color: 'var(--slate-500)', fontSize: '13px' }}>
-                                                    No payments received for this selected criteria.
+                                                    No transactions recorded for the selected criteria.
                                                 </div>
                                             </div>
                                         </td>
                                     </tr>
                                 ) : (
-                                    pagedPayments.map((p) => {
-                                        const { principalPaid, interestPaid } = getBreakdown(p);
-                                        const billNo = p.receipts?.[0]?.receiptNumber || '—';
+                                    pagedTabGroups.map((g) => {
+                                        const isExpanded = !!expandedDates[g.date];
+                                        let count = 0;
+                                        let total = 0;
+                                        if (activeTab === 'payments') {
+                                            count = g.payments.length;
+                                            total = g.collection;
+                                        } else if (activeTab === 'docCharges') {
+                                            const docChargeLoans = g.loans.filter(l => Number(l.documentFee) > 0);
+                                            count = docChargeLoans.length;
+                                            total = g.docCharges;
+                                        } else if (activeTab === 'loans') {
+                                            count = g.loans.length;
+                                            total = g.given;
+                                        } else if (activeTab === 'expenses') {
+                                            count = g.expenses.length;
+                                            total = g.expensesAmt;
+                                        }
+
                                         return (
-                                            <tr key={p.id} className="hover-table-row">
-                                                <td className="px-6 py-4 text-left text-slate-500 font-medium">{formatDate(p.paymentDate)}</td>
-                                                <td className="px-6 py-4 text-left">
-                                                    <span className="text-slate-700 font-mono text-xs">{billNo}</span>
-                                                </td>
-                                                <td className="px-6 py-4 text-left">
-                                                    <span className="text-slate-900 font-semibold">{p.loanId?.slice(0, 8).toUpperCase()}</span>
-                                                </td>
-                                                <td className="px-6 py-4 text-left">
-                                                    <span className="text-slate-900 font-semibold">{p.loan?.customer?.name || '—'}</span>
-                                                </td>
-                                                <td className="px-6 py-4 text-center">
-                                                    <span className="text-slate-900 font-bold">{fmtShort(principalPaid)}</span>
-                                                </td>
-                                                <td className="px-6 py-4 text-center">
-                                                    <span className="text-emerald-600 font-bold">{fmtShort(interestPaid)}</span>
-                                                </td>
-                                                <td className="px-6 py-4 text-center">
-                                                    <span className="text-slate-900 font-extrabold">{fmtShort(p.amount)}</span>
-                                                </td>
-                                                <td className="px-6 py-4 text-center">
-                                                    <span className="inline-flex items-center px-2 py-1 rounded-md bg-slate-100 text-slate-700 text-xs font-bold">
-                                                        {p.creator?.name || 'System'}
-                                                    </span>
-                                                </td>
-                                            </tr>
+                                            <React.Fragment key={g.date}>
+                                                <tr className="hover-table-row font-medium">
+                                                    <td className="px-4 py-4 text-center">
+                                                        <button 
+                                                            onClick={() => setExpandedDates(prev => ({ ...prev, [g.date]: !isExpanded }))}
+                                                            style={{
+                                                                background: '#f1f5f9',
+                                                                border: 'none',
+                                                                padding: '6px',
+                                                                borderRadius: '8px',
+                                                                cursor: 'pointer',
+                                                                color: '#475569',
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                transition: 'all 0.2s'
+                                                            }}
+                                                            className="hover:bg-slate-200"
+                                                        >
+                                                            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                                                        </button>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-left text-slate-900 font-semibold">{renderGroupLabel(g.date)}</td>
+                                                    <td className="px-6 py-4 text-center text-slate-500 font-medium">{count} {count === 1 ? 'entry' : 'entries'}</td>
+                                                    <td className="px-6 py-4 text-right text-slate-900 font-bold" style={{ color: (activeTab === 'payments' || activeTab === 'docCharges') ? 'var(--color-success)' : '#ef4444' }}>
+                                                        {fmt(total)}
+                                                    </td>
+                                                </tr>
+                                                {isExpanded && (
+                                                    <tr className="bg-slate-50/30">
+                                                        <td colSpan={4} className="px-6 py-4">
+                                                            {activeTab === 'payments' && renderPaymentsSubTable(g.payments)}
+                                                            {activeTab === 'docCharges' && renderDocChargesSubTable(g.loans.filter(l => Number(l.documentFee) > 0))}
+                                                            {activeTab === 'loans' && renderLoansGivenSubTable(g.loans)}
+                                                            {activeTab === 'expenses' && renderExpensesSubTable(g.expenses)}
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
                                         );
                                     })
                                 )}
                             </tbody>
                         </table>
                     </div>
+                )}
 
-                    {filteredPayments.length > 0 && (
+                {(() => {
+                    let page = 1;
+                    let setPage = () => {};
+                    let totalPages = 1;
+                    if (activeTab === 'all') { page = allPage; setPage = setAllPage; totalPages = totalAllPages; }
+                    else if (activeTab === 'payments') { page = paymentPage; setPage = setPaymentPage; totalPages = totalTabGroupPages; }
+                    else if (activeTab === 'docCharges') { page = loanPage; setPage = setLoanPage; totalPages = totalTabGroupPages; }
+                    else if (activeTab === 'loans') { page = loansGivenPage; setPage = setLoansGivenPage; totalPages = totalTabGroupPages; }
+                    else if (activeTab === 'expenses') { page = expensePage; setPage = setExpensePage; totalPages = totalTabGroupPages; }
+
+                    const currentGroupsLength = activeTab === 'all' ? filteredDateGroups.length : tabGroups.length;
+
+                    return currentGroupsLength > 0 && (
                         <div className="table-pagination" style={{ padding: 'var(--space-4) var(--space-6)', borderTop: '1px solid var(--slate-100)' }}>
                             <div className="pagination-info text-sm text-slate-500 font-medium">
-                                Showing {startIdx} to {endIdx} of {filteredPayments.length} entries
+                                Showing {startIdx} to {endIdx} of {currentGroupsLength} entries
                             </div>
                             <div className="pagination-btns flex gap-1">
                                 <button
-                                    disabled={paymentPage === 1}
-                                    onClick={() => setPaymentPage(paymentPage - 1)}
+                                    disabled={page === 1}
+                                    onClick={() => setPage(page - 1)}
                                     className="btn btn-sm btn-secondary"
                                     style={{ padding: '4px 10px' }}
                                 >
                                     <ChevronLeft size={14} /> Prev
                                 </button>
-                                {[...Array(totalPaymentPages)].map((_, i) => (
+                                {[...Array(totalPages)].map((_, i) => (
                                     <button
                                         key={i + 1}
-                                        className={`btn btn-sm ${paymentPage === i + 1 ? 'btn-primary' : 'btn-secondary'}`}
-                                        onClick={() => setPaymentPage(i + 1)}
+                                        className={`btn btn-sm ${page === i + 1 ? 'btn-primary' : 'btn-secondary'}`}
+                                        onClick={() => setPage(i + 1)}
                                         style={{ minWidth: '32px', padding: '4px' }}
                                     >
                                         {i + 1}
                                     </button>
                                 )).slice(0, 5)}
                                 <button
-                                    disabled={paymentPage >= totalPaymentPages}
-                                    onClick={() => setPaymentPage(paymentPage + 1)}
+                                    disabled={page >= totalPages}
+                                    onClick={() => setPage(page + 1)}
                                     className="btn btn-sm btn-secondary"
                                     style={{ padding: '4px 10px' }}
                                 >
@@ -1366,189 +1848,9 @@ export default function Collections() {
                                 </button>
                             </div>
                         </div>
-                    )}
-                </div>
-            ) : activeTab === 'docCharges' ? (
-                <div className="card p-0" style={{ overflow: 'hidden', border: '1px solid var(--slate-200)' }}>
-                    <div className="table-container p-0 border-0 shadow-none">
-                        <table className="w-full text-sm">
-                            <thead>
-                                <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                                    <th className="px-6 py-4 text-left">Date Disbursed</th>
-                                    <th className="px-6 py-4 text-left">Loan No</th>
-                                    <th className="px-6 py-4 text-left">Customer</th>
-                                    <th className="px-6 py-4 text-center">Principal Amount</th>
-                                    <th className="px-6 py-4 text-center">Document Charges (5%)</th>
-                                    <th className="px-6 py-4 text-center">Disbursed By</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {pagedLoans.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={6}>
-                                            <div className="empty-state-inline" style={{ padding: 'var(--space-8) 0' }}>
-                                                <div className="empty-icon" style={{ display: 'inline-flex', padding: '12px', background: 'var(--slate-100)', borderRadius: '50%', color: 'var(--slate-400)', marginBottom: '12px' }}>
-                                                    <Receipt size={24} />
-                                                </div>
-                                                <div className="empty-title" style={{ fontWeight: 600, color: 'var(--slate-800)', fontSize: '15px' }}>No document fees found</div>
-                                                <div className="empty-desc" style={{ color: 'var(--slate-500)', fontSize: '13px' }}>
-                                                    No loans disbursed for this selected criteria.
-                                                </div>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    pagedLoans.map((l) => (
-                                        <tr key={l.id} className="hover-table-row">
-                                            <td className="px-6 py-4 text-left text-slate-500 font-medium">{formatDate(l.startDate)}</td>
-                                            <td className="px-6 py-4 text-left">
-                                                <span className="text-slate-900 font-semibold">{l.id?.slice(0, 8).toUpperCase()}</span>
-                                            </td>
-                                            <td className="px-6 py-4 text-left">
-                                                <span className="text-slate-900 font-semibold">{l.customer?.name || '—'}</span>
-                                            </td>
-                                            <td className="px-6 py-4 text-center">
-                                                <span className="text-slate-900 font-bold">{fmtShort(Number(l.principalAmount))}</span>
-                                            </td>
-                                            <td className="px-6 py-4 text-center">
-                                                <span className="text-emerald-600 font-extrabold">{fmtShort(Number(l.documentFee))}</span>
-                                            </td>
-                                            <td className="px-6 py-4 text-center">
-                                                <span className="inline-flex items-center px-2 py-1 rounded-md bg-slate-100 text-slate-700 text-xs font-bold">
-                                                    {l.assignedStaff?.name || 'Admin'}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    {filteredLoans.length > 0 && (
-                        <div className="table-pagination" style={{ padding: 'var(--space-4) var(--space-6)', borderTop: '1px solid var(--slate-100)' }}>
-                            <div className="pagination-info text-sm text-slate-500 font-medium">
-                                Showing {(loanPage - 1) * PAGE_SIZE + 1} to {Math.min(loanPage * PAGE_SIZE, filteredLoans.length)} of {filteredLoans.length} entries
-                            </div>
-                            <div className="pagination-btns flex gap-1">
-                                <button
-                                    disabled={loanPage === 1}
-                                    onClick={() => setLoanPage(loanPage - 1)}
-                                    className="btn btn-sm btn-secondary"
-                                    style={{ padding: '4px 10px' }}
-                                >
-                                    <ChevronLeft size={14} /> Prev
-                                </button>
-                                {[...Array(totalLoanPages)].map((_, i) => (
-                                    <button
-                                        key={i + 1}
-                                        className={`btn btn-sm ${loanPage === i + 1 ? 'btn-primary' : 'btn-secondary'}`}
-                                        onClick={() => setLoanPage(i + 1)}
-                                        style={{ minWidth: '32px', padding: '4px' }}
-                                    >
-                                        {i + 1}
-                                    </button>
-                                )).slice(0, 5)}
-                                <button
-                                    disabled={loanPage >= totalLoanPages}
-                                    onClick={() => setLoanPage(loanPage + 1)}
-                                    className="btn btn-sm btn-secondary"
-                                    style={{ padding: '4px 10px' }}
-                                >
-                                    Next <ChevronRight size={14} />
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            ) : (
-                <div className="card p-0" style={{ overflow: 'hidden', border: '1px solid var(--slate-200)' }}>
-                    <div className="table-container p-0 border-0 shadow-none">
-                        <table className="w-full text-sm">
-                            <thead>
-                                <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                                    <th className="px-6 py-4 text-left">Date</th>
-                                    <th className="px-6 py-4 text-left">Category</th>
-                                    <th className="px-6 py-4 text-left">Description</th>
-                                    <th className="px-6 py-4 text-center">Amount</th>
-                                    <th className="px-6 py-4 text-center">Recorded By</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {pagedExpenses.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={5}>
-                                            <div className="empty-state-inline" style={{ padding: 'var(--space-8) 0' }}>
-                                                <div className="empty-icon" style={{ display: 'inline-flex', padding: '12px', background: 'var(--slate-100)', borderRadius: '50%', color: 'var(--slate-400)', marginBottom: '12px' }}>
-                                                    <ArrowDownCircle size={24} />
-                                                </div>
-                                                <div className="empty-title" style={{ fontWeight: 600, color: 'var(--slate-800)', fontSize: '15px' }}>No expenses found</div>
-                                                <div className="empty-desc" style={{ color: 'var(--slate-500)', fontSize: '13px' }}>
-                                                    No expenses recorded for this selected criteria.
-                                                </div>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    pagedExpenses.map((e) => (
-                                        <tr key={e.id} className="hover-table-row">
-                                            <td className="px-6 py-4 text-left text-slate-500 font-medium">{formatDate(e.expenseDate)}</td>
-                                            <td className="px-6 py-4 text-left">
-                                                <span className="text-slate-900 font-semibold" style={{ textTransform: 'capitalize' }}>{e.category}</span>
-                                            </td>
-                                            <td className="px-6 py-4 text-left text-slate-600">{e.description || '—'}</td>
-                                            <td className="px-6 py-4 text-center">
-                                                <span className="text-slate-900 font-extrabold" style={{ color: 'rgb(239, 68, 68)' }}>{fmtShort(Number(e.amount))}</span>
-                                            </td>
-                                            <td className="px-6 py-4 text-center">
-                                                <span className="inline-flex items-center px-2 py-1 rounded-md bg-slate-100 text-slate-700 text-xs font-bold">
-                                                    {e.creator?.name || 'System'}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    {filteredExpenses.length > 0 && (
-                        <div className="table-pagination" style={{ padding: 'var(--space-4) var(--space-6)', borderTop: '1px solid var(--slate-100)' }}>
-                            <div className="pagination-info text-sm text-slate-500 font-medium">
-                                Showing {(expensePage - 1) * PAGE_SIZE + 1} to {Math.min(expensePage * PAGE_SIZE, filteredExpenses.length)} of {filteredExpenses.length} entries
-                            </div>
-                            <div className="pagination-btns flex gap-1">
-                                <button
-                                    disabled={expensePage === 1}
-                                    onClick={() => setExpensePage(expensePage - 1)}
-                                    className="btn btn-sm btn-secondary"
-                                    style={{ padding: '4px 10px' }}
-                                >
-                                    <ChevronLeft size={14} /> Prev
-                                </button>
-                                {[...Array(totalExpensePages)].map((_, i) => (
-                                    <button
-                                        key={i + 1}
-                                        className={`btn btn-sm ${expensePage === i + 1 ? 'btn-primary' : 'btn-secondary'}`}
-                                        onClick={() => setExpensePage(i + 1)}
-                                        style={{ minWidth: '32px', padding: '4px' }}
-                                    >
-                                        {i + 1}
-                                    </button>
-                                )).slice(0, 5)}
-                                <button
-                                    disabled={expensePage >= totalExpensePages}
-                                    onClick={() => setExpensePage(expensePage + 1)}
-                                    className="btn btn-sm btn-secondary"
-                                    style={{ padding: '4px 10px' }}
-                                >
-                                    Next <ChevronRight size={14} />
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )}
+                    );
+                })()}
+            </div>
 
             {/* Add Expense Modal */}
             {showExpenseModal && (

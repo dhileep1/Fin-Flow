@@ -1,14 +1,17 @@
 const express = require('express');
 const { authenticate } = require('../middleware/auth');
 const { tenantScope } = require('../middleware/tenantScope');
+const { requireRole } = require('../middleware/rbac');
+const validate = require('../middleware/validate');
+const { seizeVehicleSchema, updateSeizureValuationSchema } = require('../utils/validation.schemas');
 const { seizeVehicle, getSeizedInventory, updateSeizureValuation } = require('../controllers/seizure.controller');
 
 const router = express.Router({ mergeParams: true });
 
 router.use(authenticate, tenantScope);
 
-router.post('/', seizeVehicle);
+router.post('/', requireRole('admin', 'accountant'), validate(seizeVehicleSchema), seizeVehicle);
 router.get('/inventory', getSeizedInventory);
-router.put('/:id/valuation', updateSeizureValuation);
+router.put('/:id/valuation', requireRole('admin', 'accountant'), validate(updateSeizureValuationSchema), updateSeizureValuation);
 
 module.exports = router;

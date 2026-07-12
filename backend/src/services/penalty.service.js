@@ -12,7 +12,7 @@ const { v4: uuidv4 } = require('uuid');
  */
 async function accrueDailyPenalties(orgId = null) {
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    today.setUTCHours(0, 0, 0, 0);
 
     const where = {
         dueDate: { lt: today },
@@ -26,65 +26,96 @@ async function accrueDailyPenalties(orgId = null) {
     // Find all overdue unpaid dues
     const overdueDues = await prisma.loanDue.findMany({
         where,
-        include: {
-            penalties: {
-                where: { penaltyDate: today },
-            },
-        },
     });
 
     let totalPenaltiesAccrued = 0;
     const penaltiesCreated = [];
 
     for (const due of overdueDues) {
-        // Skip if already processed today (idempotency)
-        if (due.penalties.length > 0) continue;
-
-        // Non-compounding: pending = (principalDue + interestDue) - amountPaid
-        // Only use base due (excl. penalty) for non-compounding calculation
-        const baseDue = Number(due.principalDue) + Number(due.interestDue);
-        const pendingDue = Math.max(0, baseDue - Number(due.amountPaid));
-
-        if (pendingDue <= 0) continue;
-
-        const dailyPenalty = roundHalfUp(pendingDue * 0.00002);
-        if (dailyPenalty <= 0) continue;
-
         try {
             await prisma.$transaction(async (tx) => {
-                // Insert penalty record
-                await tx.penalty.create({
-                    data: {
-                        id: uuidv4(),
-                        orgId: due.orgId,
-                        loanDueId: due.id,
-                        penaltyDate: today,
-                        penaltyAmount: dailyPenalty,
-                    },
+                // Fetch the latest state of the due inside the transaction to avoid stale read
+                const currentDue = await tx.loanDue.findUnique({
+                    where: { id: due.id },
+                    include: { penalties: true }
                 });
 
-                // Update loan_due
+                if (!currentDue || currentDue.status === 'paid') return;
+
+                // Non-compounding: pending = (principalDue + interestDue) - amountPaid
+                const baseDue = Number(currentDue.principalDue) + Number(currentDue.interestDue);
+                const pendingDue = Math.max(0, baseDue - Number(currentDue.amountPaid));
+
+                if (pendingDue <= 0) return;
+
+                const dailyPenalty = roundHalfUp(pendingDue * 0.00002);
+                if (dailyPenalty <= 0) return;
+
+                // Calculate missing dates from currentDue.dueDate + 1 day to today (inclusive)
+                const startRangeDate = new Date(currentDue.dueDate);
+                startRangeDate.setUTCDate(startRangeDate.getUTCDate() + 1);
+                startRangeDate.setUTCHours(0, 0, 0, 0);
+
+                const endRangeDate = new Date(today);
+                endRangeDate.setUTCHours(0, 0, 0, 0);
+
+                const missingDates = [];
+                const existingDatesSet = new Set(
+                    currentDue.penalties.map(p => {
+                        const d = new Date(p.penaltyDate);
+                        d.setUTCHours(0, 0, 0, 0);
+                        return d.getTime();
+                    })
+                );
+
+                let cur = new Date(startRangeDate);
+                while (cur <= endRangeDate) {
+                    if (!existingDatesSet.has(cur.getTime())) {
+                        missingDates.push(new Date(cur));
+                    }
+                    cur.setUTCDate(cur.getUTCDate() + 1);
+                }
+
+                if (missingDates.length === 0) return;
+
+                const totalPenaltyForMissedDays = roundHalfUp(dailyPenalty * missingDates.length);
+
+                // Create penalty records for all missing days
+                for (const mDate of missingDates) {
+                    await tx.penalty.create({
+                        data: {
+                            id: uuidv4(),
+                            orgId: currentDue.orgId,
+                            loanDueId: currentDue.id,
+                            penaltyDate: mDate,
+                            penaltyAmount: dailyPenalty,
+                        },
+                    });
+                }
+
+                // Update loan_due with atomic increments
                 await tx.loanDue.update({
-                    where: { id: due.id },
+                    where: { id: currentDue.id },
                     data: {
-                        penaltyDue: roundHalfUp(Number(due.penaltyDue) + dailyPenalty),
-                        totalDue: roundHalfUp(Number(due.totalDue) + dailyPenalty),
+                        penaltyDue: { increment: totalPenaltyForMissedDays },
+                        totalDue: { increment: totalPenaltyForMissedDays },
                     },
                 });
 
                 // Update loan accrued penalty
                 await tx.loan.update({
-                    where: { id: due.loanId },
+                    where: { id: currentDue.loanId },
                     data: {
-                        accruedPenalty: { increment: dailyPenalty },
+                        accruedPenalty: { increment: totalPenaltyForMissedDays },
                     },
                 });
-            });
 
-            totalPenaltiesAccrued += dailyPenalty;
-            penaltiesCreated.push({
-                loanDueId: due.id,
-                penaltyAmount: dailyPenalty,
+                totalPenaltiesAccrued += totalPenaltyForMissedDays;
+                penaltiesCreated.push({
+                    loanDueId: currentDue.id,
+                    penaltyAmount: totalPenaltyForMissedDays,
+                    daysAccrued: missingDates.length,
+                });
             });
         } catch (err) {
             // Unique constraint violation means already processed — skip

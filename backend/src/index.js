@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const config = require('./config/env');
 const { errorHandler } = require('./middleware/errorHandler');
 const { startWorkers } = require('./jobs/worker');
@@ -8,9 +10,30 @@ const { startWorkers } = require('./jobs/worker');
 const app = express();
 
 // --- Middleware ---
-app.use(cors({ origin: true, credentials: true }));
+app.use(helmet());
+app.use(cors({ origin: config.corsAllowedOrigins, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Rate limiting configurations
+const globalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per window
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests from this IP, please try again after 15 minutes.' }
+});
+
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10, // Limit each IP to 10 login attempts per window
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many login attempts from this IP, please try again after 15 minutes.' }
+});
+
+// Apply rate limiters
+app.use('/api', globalLimiter);
 
 // --- Health check ---
 app.get('/api/health', (req, res) => {
@@ -20,6 +43,7 @@ app.get('/api/health', (req, res) => {
 // --- API Routes ---
 const API_PREFIX = '/api/v1/:orgId';
 
+app.use(`${API_PREFIX}/auth/login`, authLimiter);
 app.use(`${API_PREFIX}/auth`, require('./routes/auth.routes'));
 app.use(`${API_PREFIX}/customers`, require('./routes/customer.routes'));
 app.use(`${API_PREFIX}/vehicles`, require('./routes/vehicle.routes'));
@@ -38,7 +62,7 @@ app.use(errorHandler);
 
 // --- Start server ---
 const PORT = config.port;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`[LendEasy] Server running on port ${PORT}`);
     console.log(`[LendEasy] API: http://localhost:${PORT}/api/v1/{orgId}`);
 

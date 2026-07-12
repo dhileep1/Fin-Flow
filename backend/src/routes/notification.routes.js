@@ -1,8 +1,12 @@
 const express = require('express');
 const { authenticate } = require('../middleware/auth');
 const { tenantScope } = require('../middleware/tenantScope');
+const { requireRole } = require('../middleware/rbac');
+const validate = require('../middleware/validate');
+const { sendNotificationSchema, bulkSendNotificationsSchema } = require('../utils/validation.schemas');
 const prisma = require('../config/database');
 const { sendNotification } = require('../services/notification.service');
+const notificationController = require('../controllers/notification.controller');
 const router = express.Router({ mergeParams: true });
 
 router.use(authenticate, tenantScope);
@@ -46,10 +50,16 @@ router.get('/targets', async (req, res, next) => {
 });
 
 /**
+ * POST /api/v1/:orgId/notifications/send
+ * Send single notification
+ */
+router.post('/send', requireRole('admin', 'accountant'), validate(sendNotificationSchema), notificationController.sendNotification);
+
+/**
  * POST /api/v1/:orgId/notifications/bulk-send
  * Send message to multiple customers
  */
-router.post('/bulk-send', async (req, res, next) => {
+router.post('/bulk-send', requireRole('admin', 'accountant'), validate(bulkSendNotificationsSchema), async (req, res, next) => {
     try {
         const { targetIds, messageBody } = req.body;
         if (!targetIds || !Array.isArray(targetIds) || !messageBody) {

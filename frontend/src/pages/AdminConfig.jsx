@@ -51,7 +51,7 @@ export default function AdminConfig() {
     const { user } = useAuth();
     const [activeTab, setActiveTab] = useState('settings');
     const [org, setOrg] = useState(null);
-    const [orgForm, setOrgForm] = useState({ name: '', phone: '', address: '' });
+    const [orgForm, setOrgForm] = useState({ name: '', phone: '', address: '', startingCash: 0 });
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showUserForm, setShowUserForm] = useState(false);
@@ -60,7 +60,7 @@ export default function AdminConfig() {
     const [toast, setToast] = useState(null);
     const [copied, setCopied] = useState(false);
     const [page, setPage] = useState(1);
-
+    
     // Audit Log state
     const [auditLogs, setAuditLogs] = useState([]);
     const [auditTotal, setAuditTotal] = useState(0);
@@ -166,7 +166,8 @@ export default function AdminConfig() {
                 setEditForm({
                     name: data.name || '',
                     phone: data.phone || '',
-                    address: data.address || ''
+                    address: data.address || '',
+                    startingCash: data.settings?.startingCash || 0
                 });
             }
         } catch (err) {
@@ -189,6 +190,8 @@ export default function AdminConfig() {
                 payload.monthlyInterestRate = Number(editForm.monthlyInterestRate);
             } else if (editingEntity.type === 'call_log') {
                 payload.promisedPaymentAmount = editForm.promisedPaymentAmount ? Number(editForm.promisedPaymentAmount) : null;
+            } else if (editingEntity.type === 'organization') {
+                payload.startingCash = Number(editForm.startingCash);
             }
             await api.updateAuditLogEntity(editingEntity.type, editingEntity.id, payload);
             showToast('Entity details updated successfully!');
@@ -330,7 +333,12 @@ export default function AdminConfig() {
                 api.getUsers(),
             ]);
             setOrg(orgData);
-            setOrgForm({ name: orgData?.name || '', phone: orgData?.phone || '', address: orgData?.address || '' });
+            setOrgForm({
+                name: orgData?.name || '',
+                phone: orgData?.phone || '',
+                address: orgData?.address || '',
+                startingCash: orgData?.settings?.startingCash || 0
+            });
             setUsers(usersData);
         } catch (err) {
             console.error('Failed to load admin data:', err);
@@ -460,6 +468,16 @@ export default function AdminConfig() {
                                 {copied ? <Check size={14} /> : <Copy size={14} />}
                             </button>
                         </div>
+                    </div>
+                    <div className="form-group mt-4">
+                        <label className="form-label">Starting Cash in Hand (₹)</label>
+                        <input
+                            type="number"
+                            className="form-input"
+                            value={orgForm.startingCash}
+                            onChange={(e) => setOrgForm({ ...orgForm, startingCash: Number(e.target.value) })}
+                            placeholder="Starting cash balance for daily ledgers"
+                        />
                     </div>
 
                     <div className="flex justify-end mt-6">
@@ -943,6 +961,15 @@ export default function AdminConfig() {
                                                 value={editForm.address} 
                                                 onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} 
                                                 rows={2}
+                                            />
+                                        </div>
+                                        <div className="form-group">
+                                            <label className="form-label">Starting Cash in Hand (₹)</label>
+                                            <input 
+                                                type="number"
+                                                className="form-input" 
+                                                value={editForm.startingCash} 
+                                                onChange={(e) => setEditForm({ ...editForm, startingCash: Number(e.target.value) })} 
                                             />
                                         </div>
                                     </>
