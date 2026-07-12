@@ -17,6 +17,10 @@ const mockTx = {
     receipt: {
         create: jest.fn(),
     },
+    organization: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'org-1', name: 'QuickLoans Pvt Ltd', settings: {} }),
+        update: jest.fn(),
+    },
 };
 
 jest.mock('../src/config/database', () => {
@@ -29,6 +33,34 @@ jest.mock('../src/config/database', () => {
         loan: {
             findUnique: jest.fn(),
             update: jest.fn(),
+        },
+        payment: {
+            findFirst: jest.fn(),
+            findUnique: jest.fn().mockResolvedValue({
+                id: 'payment-1',
+                amount: 110,
+                paymentDate: new Date(),
+                paymentMethod: 'cash',
+                loanId: 'loan-1',
+                org: { name: 'QuickLoans Pvt Ltd' },
+                loan: {
+                    customer: { name: 'Suresh Babu', phone: '9988776655' },
+                    vehicle: { vehicleNumber: 'KA-01-AB-1234', model: 'Honda Activa' }
+                },
+                receipts: [{ receiptNumber: 'RCP-QUI-000006' }],
+                allocationDetails: [{ dueSequence: 1, principal: 100, interest: 10, penalty: 0, total: 110 }]
+            })
+        },
+        receipt: {
+            update: jest.fn()
+        },
+        notification: {
+            create: jest.fn().mockResolvedValue({ id: 'notif-1' }),
+            update: jest.fn(),
+            findFirst: jest.fn(),
+        },
+        customer: {
+            findUnique: jest.fn().mockResolvedValue({ id: 'customer-1', phone: '9988776655', optOutWhatsapp: false })
         },
         auditLog: {
             create: jest.fn().mockResolvedValue({ id: 'audit-log-1' }),

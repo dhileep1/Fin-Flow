@@ -55,8 +55,15 @@ async function createLoan({ orgId, customerId, vehicleId, assignedStaffId, princ
     const r = Number(monthlyInterestRate);
     const N = tenureMonths;
 
+    // Fetch organization settings for processing fee
+    const org = await prisma.organization.findUnique({
+        where: { id: orgId }
+    });
+    const settings = org?.settings || {};
+    const docFeePercent = settings.documentFeePercent !== undefined ? Number(settings.documentFeePercent) : 0.05;
+
     // Compute fees
-    const documentFee = roundHalfUp(P * 0.05);
+    const documentFee = roundHalfUp(P * docFeePercent);
     const disbursedAmount = roundHalfUp(P - documentFee);
 
     // Generate schedule

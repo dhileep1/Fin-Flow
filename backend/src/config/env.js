@@ -12,6 +12,16 @@ if (process.env.NODE_ENV === 'production' && process.env.JWT_SECRET === 'dev-sec
     throw new Error('FATAL ERROR: JWT_SECRET cannot be "dev-secret" in production.');
 }
 
+if (process.env.NODE_ENV === 'production' && (!process.env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY.length < 32)) {
+    throw new Error('FATAL ERROR: ENCRYPTION_KEY must be set and at least 32 characters in production.');
+}
+
+if (process.env.NODE_ENV === 'production' && process.env.WHATSAPP_PROVIDER === 'twilio') {
+    if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
+        throw new Error('FATAL ERROR: Twilio configuration (account SID, auth token, and phone number) must be fully specified in production when using twilio provider.');
+    }
+}
+
 module.exports = {
   port: parseInt(process.env.PORT, 10) || 3000,
   jwtSecret: process.env.JWT_SECRET,
@@ -19,7 +29,20 @@ module.exports = {
   databaseUrl: process.env.DATABASE_URL,
   redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
   nodeEnv: process.env.NODE_ENV || 'development',
+  encryptionKey: process.env.ENCRYPTION_KEY || 'dev-encryption-key-32-chars-long',
   corsAllowedOrigins: process.env.CORS_ALLOWED_ORIGINS
     ? process.env.CORS_ALLOWED_ORIGINS.split(',')
     : ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  
+  // Twilio
+  whatsappProvider: process.env.WHATSAPP_PROVIDER || 'mock',
+  twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
+  twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
+  twilioPhoneNumber: process.env.TWILIO_PHONE_NUMBER,
+
+  // S3
+  awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  awsRegion: process.env.AWS_REGION || 'us-east-1',
+  s3BucketName: process.env.S3_BUCKET_NAME,
 };

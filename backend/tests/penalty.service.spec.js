@@ -12,6 +12,10 @@ const mockTx = {
     penalty: {
         create: jest.fn(),
     },
+    organization: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'org-1', name: 'QuickLoans Pvt Ltd', settings: {} }),
+        update: jest.fn(),
+    },
 };
 
 jest.mock('../src/config/database', () => {

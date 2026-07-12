@@ -1,7 +1,22 @@
 const loanService = require('../services/loan.service');
 const prisma = require('../config/database');
 const { logAudit } = require('../services/audit.service');
+const { encrypt, decrypt } = require('../utils/encryption');
 const { v4: uuidv4 } = require('uuid');
+
+function decryptLoan(loan) {
+    if (!loan) return loan;
+    if (loan.customer) {
+        loan.customer.aadharNumber = decrypt(loan.customer.aadharNumber);
+    }
+    if (loan.guarantors) {
+        loan.guarantors = loan.guarantors.map(g => ({
+            ...g,
+            aadharNumber: decrypt(g.aadharNumber)
+        }));
+    }
+    return loan;
+}
 
 async function createLoan(req, res, next) {
     try {
@@ -48,7 +63,7 @@ async function createLoan(req, res, next) {
                                 orgId: req.orgId,
                                 name: g.name,
                                 phone: g.phone,
-                                aadharNumber: g.aadharNumber ? g.aadharNumber.replace(/\s/g, '') : null,
+                                aadharNumber: g.aadharNumber ? encrypt(g.aadharNumber.replace(/\s/g, '')) : null,
                                 address: g.address,
                             }
                         });
@@ -64,7 +79,7 @@ async function createLoan(req, res, next) {
                         customerId: customerId || null,
                         name: g.name,
                         phone: g.phone,
-                        aadharNumber: g.aadharNumber,
+                        aadharNumber: g.aadharNumber ? encrypt(g.aadharNumber) : null,
                         address: g.address,
                         photoUrl: g.photoUrl,
                     },
@@ -74,7 +89,7 @@ async function createLoan(req, res, next) {
 
         // Re-fetch with guarantors
         const fullLoan = await loanService.getLoanById(req.orgId, loan.id);
-        res.status(201).json(fullLoan);
+        res.status(201).json(decryptLoan(fullLoan));
     } catch (err) {
         next(err);
     }
@@ -84,7 +99,7 @@ async function getLoan(req, res, next) {
     try {
         const loan = await loanService.getLoanById(req.orgId, req.params.id);
         if (!loan) return res.status(404).json({ error: 'Loan not found' });
-        res.json(loan);
+        res.json(decryptLoan(loan));
     } catch (err) {
         next(err);
     }
@@ -102,6 +117,14 @@ async function listLoans(req, res, next) {
             q,
             type,
         });
+        
+        result.loans = result.loans.map(loan => {
+            if (loan.customer) {
+                loan.customer.aadharNumber = decrypt(loan.customer.aadharNumber);
+            }
+            return loan;
+        });
+
         res.json(result);
     } catch (err) {
         next(err);
@@ -128,7 +151,7 @@ async function getDues(req, res, next) {
                 include: {
                     loan: {
                         include: {
-                            customer: { select: { name: true, phone: true } },
+                            customer: { select: { name: true, phone: true, aadharNumber: true } },
                             vehicle: { select: { vehicleNumber: true } },
                         },
                     },
@@ -140,7 +163,14 @@ async function getDues(req, res, next) {
             prisma.loanDue.count({ where }),
         ]);
 
-        res.json({ dues, total, page: Number(page), limit: Number(limit) });
+        const decryptedDues = dues.map(d => {
+            if (d.loan && d.loan.customer) {
+                d.loan.customer.aadharNumber = decrypt(d.loan.customer.aadharNumber);
+            }
+            return d;
+        });
+
+        res.json({ dues: decryptedDues, total, page: Number(page), limit: Number(limit) });
     } catch (err) {
         next(err);
     }
@@ -183,7 +213,7 @@ async function forecloseLoan(req, res, next) {
             paymentDate
         });
 
-        res.json(result);
+        res.json(decryptLoan(result));
     } catch (err) {
         next(err);
     }

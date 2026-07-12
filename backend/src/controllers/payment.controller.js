@@ -13,6 +13,8 @@ async function createPayment(req, res, next) {
             return res.status(400).json({ error: 'Amount must be positive' });
         }
 
+        const idempotencyKey = req.headers['idempotency-key'];
+
         const result = await paymentService.recordPayment({
             orgId: req.orgId,
             loanId,
@@ -21,6 +23,7 @@ async function createPayment(req, res, next) {
             referenceNumber,
             createdBy: req.user.id,
             paymentDate,
+            idempotencyKey,
         });
 
         res.status(201).json(result);

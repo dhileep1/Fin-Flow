@@ -13,6 +13,7 @@
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --forceExit"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1085.0",
     "@prisma/client": "^6.4.0",
     "bcrypt": "^5.1.1",
     "bullmq": "^5.30.0",
@@ -25,6 +26,7 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
     "pdfkit": "^0.15.1",
+    "twilio": "^6.0.2",
     "uuid": "^11.1.0",
     "zod": "^4.4.3"
   },

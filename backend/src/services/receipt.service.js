@@ -1,6 +1,40 @@
 const PDFDocument = require('pdfkit');
 const prisma = require('../config/database');
 const { roundHalfUp } = require('../utils/rounding');
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const env = require('../config/env');
+
+let s3Client = null;
+if (env.awsAccessKeyId && env.awsSecretAccessKey) {
+    s3Client = new S3Client({
+        region: env.awsRegion,
+        credentials: {
+            accessKeyId: env.awsAccessKeyId,
+            secretAccessKey: env.awsSecretAccessKey
+        }
+    });
+}
+
+async function uploadReceiptToS3(receiptId, pdfBuffer) {
+    if (!s3Client || !env.s3BucketName) {
+        console.log(`[S3 Mock] Mock uploading receipt ${receiptId} (S3 bucket or credentials not set)`);
+        return `https://s3.amazonaws.com/mock-bucket/receipts/${receiptId}.pdf`;
+    }
+    
+    const key = `receipts/${receiptId}.pdf`;
+    try {
+        await s3Client.send(new PutObjectCommand({
+            Bucket: env.s3BucketName,
+            Key: key,
+            Body: pdfBuffer,
+            ContentType: 'application/pdf',
+        }));
+        return `https://${env.s3BucketName}.s3.${env.awsRegion}.amazonaws.com/${key}`;
+    } catch (err) {
+        console.error(`[S3 Error] Upload failed for receipt ${receiptId}:`, err.message);
+        throw err;
+    }
+}
 
 /**
  * Generate a PDF receipt for a payment and return as a Buffer.
@@ -145,4 +179,4 @@ async function generateReceiptPDF(paymentId) {
     });
 }
 
-module.exports = { generateReceiptPDF };
+module.exports = { generateReceiptPDF, uploadReceiptToS3 };

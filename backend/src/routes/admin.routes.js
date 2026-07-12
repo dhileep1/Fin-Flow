@@ -4,6 +4,7 @@ const { tenantScope } = require('../middleware/tenantScope');
 const { requireRole } = require('../middleware/rbac');
 const prisma = require('../config/database');
 const bcrypt = require('bcrypt');
+const { encrypt, decrypt } = require('../utils/encryption');
 const router = express.Router({ mergeParams: true });
 
 router.use(authenticate, tenantScope);
@@ -18,14 +19,18 @@ router.get('/settings', requireRole('admin'), async (req, res, next) => {
 
 router.put('/settings', requireRole('admin'), async (req, res, next) => {
     try {
-        const { name, phone, address, startingCash } = req.body;
+        const { name, phone, address, startingCash, penaltyRate, documentFeePercent, gracePeriodDays, allocationOrder } = req.body;
         const oldOrg = await prisma.organization.findUnique({
             where: { id: req.orgId }
         });
         
         const settings = {
             ...(oldOrg.settings || {}),
-            startingCash: startingCash !== undefined ? Number(startingCash) : (oldOrg.settings?.startingCash || 0)
+            startingCash: startingCash !== undefined ? Number(startingCash) : (oldOrg.settings?.startingCash || 0),
+            penaltyRate: penaltyRate !== undefined ? Number(penaltyRate) : (oldOrg.settings?.penaltyRate || 0.00002),
+            documentFeePercent: documentFeePercent !== undefined ? Number(documentFeePercent) : (oldOrg.settings?.documentFeePercent || 0.05),
+            gracePeriodDays: gracePeriodDays !== undefined ? Number(gracePeriodDays) : (oldOrg.settings?.gracePeriodDays || 0),
+            allocationOrder: allocationOrder !== undefined ? allocationOrder : (oldOrg.settings?.allocationOrder || ['penalty', 'interest', 'principal'])
         };
 
         const org = await prisma.organization.update({
@@ -536,6 +541,7 @@ router.get('/audit-logs/entity/:entityType/:entityId', requireRole('admin'), asy
                 where: { id: entityId, orgId: req.orgId }
             });
             if (!customer) return res.status(404).json({ error: 'Customer not found' });
+            customer.aadharNumber = decrypt(customer.aadharNumber);
             return res.json(customer);
         }
 
@@ -589,12 +595,16 @@ router.put('/audit-logs/entity/:entityType/:entityId', requireRole('admin'), asy
             });
             if (!existing) return res.status(404).json({ error: 'Customer not found' });
 
+            const encryptedAadhar = aadharNumber !== undefined ? encrypt(aadharNumber) : undefined;
+
             const updated = await prisma.customer.update({
                 where: { id: entityId },
-                data: { name, phone, altPhone, address, aadharNumber, photoUrl, optOutWhatsapp }
+                data: { name, phone, altPhone, address, aadharNumber: encryptedAadhar, photoUrl, optOutWhatsapp }
             });
 
             const { logAudit } = require('../services/audit.service');
+            const maskAadhar = (val) => val ? 'XXXX-XXXX-' + val.toString().replace(/[\s-]/g, '').slice(-4) : val;
+
             await logAudit({
                 orgId: req.orgId,
                 userId: req.user.id,
@@ -607,16 +617,27 @@ router.put('/audit-logs/entity/:entityType/:entityId', requireRole('admin'), asy
                         phone: existing.phone,
                         altPhone: existing.altPhone,
                         address: existing.address,
-                        aadharNumber: existing.aadharNumber,
+                        aadharNumber: maskAadhar(decrypt(existing.aadharNumber)),
                         photoUrl: existing.photoUrl,
                         optOutWhatsapp: existing.optOutWhatsapp
                     },
-                    updated: { name, phone, altPhone, address, aadharNumber, photoUrl, optOutWhatsapp },
+                    updated: { 
+                        name, 
+                        phone, 
+                        altPhone, 
+                        address, 
+                        aadharNumber: maskAadhar(aadharNumber), 
+                        photoUrl, 
+                        optOutWhatsapp 
+                    },
                     source: 'admin_edit_history'
                 }
             });
 
-            return res.json(updated);
+            return res.json({
+                ...updated,
+                aadharNumber: decrypt(updated.aadharNumber)
+            });
         }
 
         if (entityType === 'loan') {

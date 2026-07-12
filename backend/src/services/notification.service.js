@@ -1,5 +1,12 @@
 const prisma = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
+const twilio = require('twilio');
+const env = require('../config/env');
+
+let twilioClient = null;
+if (env.twilioAccountSid && env.twilioAuthToken) {
+    twilioClient = twilio(env.twilioAccountSid, env.twilioAuthToken);
+}
 
 /**
  * WhatsApp provider adapter interface.
@@ -7,12 +14,38 @@ const { v4: uuidv4 } = require('uuid');
  */
 class WhatsAppProvider {
     async sendMessage(to, body, mediaUrl = null) {
-        // TODO: Replace with actual provider API call
-        console.log(`[WhatsApp] Sending to ${to}: ${body}${mediaUrl ? ` [media: ${mediaUrl}]` : ''}`);
-        return {
-            success: true,
-            providerMessageId: `msg_${uuidv4().slice(0, 12)}`,
-        };
+        if (!twilioClient || env.whatsappProvider !== 'twilio') {
+            console.log(`[WhatsApp Mock] Sending to ${to}: ${body}${mediaUrl ? ` [media: ${mediaUrl}]` : ''}`);
+            return {
+                success: true,
+                providerMessageId: `msg_${uuidv4().slice(0, 12)}`,
+            };
+        }
+
+        let recipient = to;
+        if (!recipient.startsWith('whatsapp:')) {
+            recipient = `whatsapp:${recipient}`;
+        }
+
+        try {
+            const payload = {
+                from: env.twilioPhoneNumber || 'whatsapp:+14155238886',
+                to: recipient,
+                body: body,
+            };
+            if (mediaUrl) {
+                payload.mediaUrl = [mediaUrl];
+            }
+
+            const message = await twilioClient.messages.create(payload);
+            return {
+                success: true,
+                providerMessageId: message.sid,
+            };
+        } catch (err) {
+            console.error('[Twilio Error] Failed to send message:', err.message);
+            throw err;
+        }
     }
 
     async onWebhookStatus(providerMessageId, status) {
@@ -24,8 +57,8 @@ class WhatsAppProvider {
             await prisma.notification.update({
                 where: { id: notification.id },
                 data: {
-                    status: status === 'delivered' ? 'sent' : status === 'failed' ? 'failed' : 'sent',
-                    sentAt: status === 'delivered' ? new Date() : null,
+                    status: status === 'delivered' || status === 'sent' ? 'sent' : status === 'failed' ? 'failed' : 'sent',
+                    sentAt: status === 'delivered' || status === 'sent' ? new Date() : null,
                 },
             });
         }

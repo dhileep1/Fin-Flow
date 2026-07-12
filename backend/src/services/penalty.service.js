@@ -48,12 +48,20 @@ async function accrueDailyPenalties(orgId = null) {
 
                 if (pendingDue <= 0) return;
 
-                const dailyPenalty = roundHalfUp(pendingDue * 0.00002);
+                // Load tenant-configurable penalty rate and grace period
+                const org = await tx.organization.findUnique({
+                    where: { id: currentDue.orgId }
+                });
+                const settings = org?.settings || {};
+                const penaltyRate = settings.penaltyRate !== undefined ? Number(settings.penaltyRate) : 0.00002;
+                const gracePeriodDays = settings.gracePeriodDays !== undefined ? Number(settings.gracePeriodDays) : 0;
+
+                const dailyPenalty = roundHalfUp(pendingDue * penaltyRate);
                 if (dailyPenalty <= 0) return;
 
-                // Calculate missing dates from currentDue.dueDate + 1 day to today (inclusive)
+                // Calculate missing dates from currentDue.dueDate + 1 day + gracePeriodDays to today (inclusive)
                 const startRangeDate = new Date(currentDue.dueDate);
-                startRangeDate.setUTCDate(startRangeDate.getUTCDate() + 1);
+                startRangeDate.setUTCDate(startRangeDate.getUTCDate() + 1 + gracePeriodDays);
                 startRangeDate.setUTCHours(0, 0, 0, 0);
 
                 const endRangeDate = new Date(today);

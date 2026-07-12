@@ -9,6 +9,23 @@ const { sendNotification } = require('../services/notification.service');
 const notificationController = require('../controllers/notification.controller');
 const router = express.Router({ mergeParams: true });
 
+// PUBLIC Webhook callback (bypasses auth and tenant scope for Twilio callbacks)
+router.post('/webhook', async (req, res, next) => {
+    try {
+        const { MessageSid, MessageStatus, SmsStatus, SmsSid } = req.body;
+        const sid = MessageSid || SmsSid;
+        const status = MessageStatus || SmsStatus;
+        
+        if (sid && status) {
+            const { handleWebhook } = require('../services/notification.service');
+            await handleWebhook(sid, status.toLowerCase());
+        }
+        return res.status(200).send('OK');
+    } catch (err) {
+        next(err);
+    }
+});
+
 router.use(authenticate, tenantScope);
 
 /**
