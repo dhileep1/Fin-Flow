@@ -10,6 +10,8 @@ let jobsQueue = null;
 let worker = null;
 const fallbackTimerIds = [];
 
+let connectionErrorLogged = false;
+
 function initBullMQ() {
     try {
         console.log('[BullMQ] Connecting to Redis at:', config.redisUrl);
@@ -20,12 +22,16 @@ function initBullMQ() {
         });
 
         connection.on('error', (err) => {
-            console.warn('[BullMQ] Redis connection error, falling back to interval scheduler:', err.message);
+            if (!connectionErrorLogged) {
+                console.warn('[BullMQ] Redis connection error, falling back to interval scheduler:', err.message);
+                connectionErrorLogged = true;
+            }
             startIntervalFallback();
         });
 
         connection.on('connect', async () => {
             console.log('[BullMQ] Connected to Redis. Setting up queues and workers...');
+            connectionErrorLogged = false;
             setupBullMQQueuesAndWorkers();
         });
     } catch (err) {

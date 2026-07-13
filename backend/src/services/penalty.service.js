@@ -1,4 +1,5 @@
 const prisma = require('../config/database');
+const { Prisma } = require('@prisma/client');
 const { roundHalfUp } = require('../utils/rounding');
 const { v4: uuidv4 } = require('uuid');
 
@@ -28,7 +29,7 @@ async function accrueDailyPenalties(orgId = null) {
         where,
     });
 
-    let totalPenaltiesAccrued = 0;
+    let totalPenaltiesAccrued = new Prisma.Decimal(0);
     const penaltiesCreated = [];
 
     for (const due of overdueDues) {
@@ -43,21 +44,24 @@ async function accrueDailyPenalties(orgId = null) {
                 if (!currentDue || currentDue.status === 'paid') return;
 
                 // Non-compounding: pending = (principalDue + interestDue) - amountPaid
-                const baseDue = Number(currentDue.principalDue) + Number(currentDue.interestDue);
-                const pendingDue = Math.max(0, baseDue - Number(currentDue.amountPaid));
+                const principal = new Prisma.Decimal(currentDue.principalDue);
+                const interest = new Prisma.Decimal(currentDue.interestDue);
+                const amountPaid = new Prisma.Decimal(currentDue.amountPaid);
+                const baseDue = principal.plus(interest);
+                const pendingDue = Prisma.Decimal.max(0, baseDue.minus(amountPaid));
 
-                if (pendingDue <= 0) return;
+                if (pendingDue.lessThanOrEqualTo(0)) return;
 
                 // Load tenant-configurable penalty rate and grace period
                 const org = await tx.organization.findUnique({
                     where: { id: currentDue.orgId }
                 });
                 const settings = org?.settings || {};
-                const penaltyRate = settings.penaltyRate !== undefined ? Number(settings.penaltyRate) : 0.00002;
+                const penaltyRate = new Prisma.Decimal(settings.penaltyRate !== undefined ? settings.penaltyRate : 0.00002);
                 const gracePeriodDays = settings.gracePeriodDays !== undefined ? Number(settings.gracePeriodDays) : 0;
 
-                const dailyPenalty = roundHalfUp(pendingDue * penaltyRate);
-                if (dailyPenalty <= 0) return;
+                const dailyPenalty = new Prisma.Decimal(pendingDue.times(penaltyRate).toFixed(2));
+                if (dailyPenalty.lessThanOrEqualTo(0)) return;
 
                 // Calculate missing dates from currentDue.dueDate + 1 day + gracePeriodDays to today (inclusive)
                 const startRangeDate = new Date(currentDue.dueDate);
@@ -86,7 +90,7 @@ async function accrueDailyPenalties(orgId = null) {
 
                 if (missingDates.length === 0) return;
 
-                const totalPenaltyForMissedDays = roundHalfUp(dailyPenalty * missingDates.length);
+                const totalPenaltyForMissedDays = dailyPenalty.times(missingDates.length);
 
                 // Create penalty records for all missing days
                 for (const mDate of missingDates) {
@@ -118,10 +122,10 @@ async function accrueDailyPenalties(orgId = null) {
                     },
                 });
 
-                totalPenaltiesAccrued += totalPenaltyForMissedDays;
+                totalPenaltiesAccrued = totalPenaltiesAccrued.plus(totalPenaltyForMissedDays);
                 penaltiesCreated.push({
                     loanDueId: currentDue.id,
-                    penaltyAmount: totalPenaltyForMissedDays,
+                    penaltyAmount: totalPenaltyForMissedDays.toNumber(),
                     daysAccrued: missingDates.length,
                 });
             });
@@ -135,7 +139,7 @@ async function accrueDailyPenalties(orgId = null) {
     return {
         processedDate: today,
         duesProcessed: penaltiesCreated.length,
-        totalPenaltiesAccrued: roundHalfUp(totalPenaltiesAccrued),
+        totalPenaltiesAccrued: totalPenaltiesAccrued.toNumber(),
         details: penaltiesCreated,
     };
 }

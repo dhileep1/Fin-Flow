@@ -1,5 +1,6 @@
 const prisma = require('../src/config/database');
 const { recordPayment } = require('../src/services/payment.service');
+const { Prisma } = require('@prisma/client');
 
 const mockTx = {
     loanDue: {
@@ -119,7 +120,7 @@ describe('Payment Service - recordPayment', () => {
         expect(mockTx.loanDue.update).toHaveBeenCalledWith({
             where: { id: 'due-1' },
             data: {
-                amountPaid: 110,
+                amountPaid: new Prisma.Decimal(110),
                 status: 'pending',
             }
         });
@@ -157,7 +158,7 @@ describe('Payment Service - recordPayment', () => {
         expect(mockTx.loanDue.update).toHaveBeenCalledWith({
             where: { id: 'due-1' },
             data: {
-                amountPaid: 125,
+                amountPaid: new Prisma.Decimal(125),
                 status: 'paid',
             }
         });

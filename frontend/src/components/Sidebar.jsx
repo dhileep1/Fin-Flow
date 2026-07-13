@@ -92,7 +92,7 @@ function SidebarSection({ label, items, collapsed, badges }) {
 }
 
 export default function Sidebar({ collapsed, onToggle }) {
-    const { logout } = useAuth();
+    const { user, logout } = useAuth();
     const navigate = useNavigate();
 
     // Fetch critical count for notification badges
@@ -144,7 +144,9 @@ export default function Sidebar({ collapsed, onToggle }) {
             </nav>
 
             <div className="sidebar-bottom">
-                <SidebarSection items={bottomNav} collapsed={collapsed} />
+                {user?.role === 'admin' && (
+                    <SidebarSection items={bottomNav} collapsed={collapsed} />
+                )}
 
                 <div className="sidebar-footer-actions">
                     <button

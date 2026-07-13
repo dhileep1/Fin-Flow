@@ -1,10 +1,11 @@
 const config = require('../config/env');
+const logger = require('../utils/logger');
 
 /**
  * Global error handler middleware.
  */
 function errorHandler(err, req, res, next) {
-    console.error('[Error]', err.message, err.stack);
+    logger.error(err);
 
     if (err.code === 'P2002') {
         return res.status(409).json({ error: 'A record with this data already exists' });

@@ -1,5 +1,6 @@
 const prisma = require('../src/config/database');
 const { accrueDailyPenalties } = require('../src/services/penalty.service');
+const { Prisma } = require('@prisma/client');
 
 const mockTx = {
     loanDue: {
@@ -79,7 +80,7 @@ describe('Penalty Service - accrueDailyPenalties', () => {
                 orgId: 'org-1',
                 loanDueId: 'due-1',
                 penaltyDate: new Date('2026-07-10T00:00:00.000Z'),
-                penaltyAmount: 0.02,
+                penaltyAmount: new Prisma.Decimal(0.02),
             }
         });
 
@@ -87,8 +88,8 @@ describe('Penalty Service - accrueDailyPenalties', () => {
         expect(mockTx.loanDue.update).toHaveBeenCalledWith({
             where: { id: 'due-1' },
             data: {
-                penaltyDue: { increment: 0.06 },
-                totalDue: { increment: 0.06 },
+                penaltyDue: { increment: new Prisma.Decimal(0.06) },
+                totalDue: { increment: new Prisma.Decimal(0.06) },
             }
         });
 
@@ -96,7 +97,7 @@ describe('Penalty Service - accrueDailyPenalties', () => {
         expect(mockTx.loan.update).toHaveBeenCalledWith({
             where: { id: 'loan-1' },
             data: {
-                accruedPenalty: { increment: 0.06 }
+                accruedPenalty: { increment: new Prisma.Decimal(0.06) }
             }
         });
 
@@ -143,7 +144,7 @@ describe('Penalty Service - accrueDailyPenalties', () => {
                 orgId: 'org-1',
                 loanDueId: 'due-1',
                 penaltyDate: new Date('2026-07-12T00:00:00.000Z'),
-                penaltyAmount: 0.02,
+                penaltyAmount: new Prisma.Decimal(0.02),
             }
         });
 

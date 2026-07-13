@@ -1,4 +1,5 @@
 const prisma = require('../config/database');
+const { Prisma } = require('@prisma/client');
 const { roundHalfUp } = require('../utils/rounding');
 const { logAudit } = require('./audit.service');
 const { v4: uuidv4 } = require('uuid');
@@ -10,6 +11,18 @@ const receiptService = require('./receipt.service');
  * Iterates dues oldest first.
  */
 async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNumber, createdBy, paymentDate, idempotencyKey }) {
+    if (paymentDate) {
+        const payDate = new Date(paymentDate);
+        const now = new Date();
+        if (payDate.getTime() > now.getTime() + 5 * 60 * 1000) {
+            throw new Error('Payment date cannot be in the future');
+        }
+        const maxPastAllowed = 3 * 24 * 60 * 60 * 1000;
+        if (now.getTime() - payDate.getTime() > maxPastAllowed) {
+            throw new Error('Payment date cannot be backdated by more than 3 days');
+        }
+    }
+
     if (idempotencyKey) {
         const existing = await prisma.payment.findFirst({
             where: { orgId, idempotencyKey },
@@ -53,9 +66,15 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
         });
 
         // 1. Overpayment validation: prevent payment exceeding total outstanding
-        const totalOutstanding = dues.reduce((sum, due) => sum + roundHalfUp(Number(due.totalDue) - Number(due.amountPaid)), 0);
-        if (remaining > roundHalfUp(totalOutstanding + 0.05)) {
-            throw new Error(`Payment amount ${amount} exceeds the total outstanding balance of ${roundHalfUp(totalOutstanding)}`);
+        const totalOutstanding = dues.reduce((sum, due) => {
+            const dueTotal = new Prisma.Decimal(due.totalDue);
+            const duePaid = new Prisma.Decimal(due.amountPaid);
+            return sum.plus(dueTotal.minus(duePaid));
+        }, new Prisma.Decimal(0));
+
+        const paymentAmount = new Prisma.Decimal(amount);
+        if (paymentAmount.greaterThan(totalOutstanding.plus(0.05))) {
+            throw new Error(`Payment amount ${amount} exceeds the total outstanding balance of ${totalOutstanding.toFixed(2)}`);
         }
 
         // Get organization and settings for dynamic allocation and receipt sequencing
@@ -65,44 +84,47 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
         const settings = org?.settings || {};
         const allocationOrder = settings.allocationOrder || ['penalty', 'interest', 'principal'];
 
-        for (const due of dues) {
-            if (remaining <= 0) break;
+        let remaining = paymentAmount;
 
-            const dueRemaining = roundHalfUp(Number(due.totalDue) - Number(due.amountPaid));
-            if (dueRemaining <= 0) continue;
+        for (const due of dues) {
+            if (remaining.lessThanOrEqualTo(0)) break;
+
+            const dueTotal = new Prisma.Decimal(due.totalDue);
+            const duePaidSoFar = new Prisma.Decimal(due.amountPaid);
+            const dueRemaining = dueTotal.minus(duePaidSoFar);
+            if (dueRemaining.lessThanOrEqualTo(0)) continue;
 
             const allocation = {
                 loanDueId: due.id,
                 dueSequence: due.dueSequence,
-                penalty: 0,
-                interest: 0,
-                principal: 0,
-                total: 0,
+                penalty: new Prisma.Decimal(0),
+                interest: new Prisma.Decimal(0),
+                principal: new Prisma.Decimal(0),
+                total: new Prisma.Decimal(0),
             };
 
-            const paymentToApply = Math.min(remaining, dueRemaining);
-            allocation.total = roundHalfUp(paymentToApply);
+            const paymentToApply = Prisma.Decimal.min(remaining, dueRemaining);
+            allocation.total = paymentToApply;
 
             // Determine how much of the existing due.amountPaid was allocated to components dynamically
-            const amountPaidSoFar = Number(due.amountPaid);
-            let currentPaidRemaining = amountPaidSoFar;
-            const paidComponents = { penalty: 0, interest: 0, principal: 0 };
+            let currentPaidRemaining = duePaidSoFar;
+            const paidComponents = { penalty: new Prisma.Decimal(0), interest: new Prisma.Decimal(0), principal: new Prisma.Decimal(0) };
             
             for (const component of allocationOrder) {
-                const limitValue = Number(component === 'penalty' ? due.penaltyDue : (component === 'interest' ? due.interestDue : due.principalDue));
-                const allocated = Math.min(currentPaidRemaining, limitValue);
+                const limitValue = new Prisma.Decimal(component === 'penalty' ? due.penaltyDue : (component === 'interest' ? due.interestDue : due.principalDue));
+                const allocated = Prisma.Decimal.min(currentPaidRemaining, limitValue);
                 paidComponents[component] = allocated;
-                currentPaidRemaining = roundHalfUp(currentPaidRemaining - allocated);
+                currentPaidRemaining = currentPaidRemaining.minus(allocated);
             }
-            if (currentPaidRemaining > 0 && allocationOrder.length > 0) {
+            if (currentPaidRemaining.greaterThan(0) && allocationOrder.length > 0) {
                 const lastComponent = allocationOrder[allocationOrder.length - 1];
-                paidComponents[lastComponent] = roundHalfUp(paidComponents[lastComponent] + currentPaidRemaining);
+                paidComponents[lastComponent] = paidComponents[lastComponent].plus(currentPaidRemaining);
             }
 
             // Unpaid portions of components
-            const penaltyUnpaid = roundHalfUp(Number(due.penaltyDue) - paidComponents.penalty);
-            const interestUnpaid = roundHalfUp(Number(due.interestDue) - paidComponents.interest);
-            const principalUnpaid = roundHalfUp(Number(due.principalDue) - paidComponents.principal);
+            const penaltyUnpaid = new Prisma.Decimal(due.penaltyDue).minus(paidComponents.penalty);
+            const interestUnpaid = new Prisma.Decimal(due.interestDue).minus(paidComponents.interest);
+            const principalUnpaid = new Prisma.Decimal(due.principalDue).minus(paidComponents.principal);
 
             const unpaidComponents = {
                 penalty: penaltyUnpaid,
@@ -113,20 +135,20 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
             // Allocate paymentToApply across unpaid components based on configured order
             let leftover = paymentToApply;
             for (const component of allocationOrder) {
-                if (leftover <= 0) break;
+                if (leftover.lessThanOrEqualTo(0)) break;
                 const unpaidVal = unpaidComponents[component];
-                const alloc = Math.min(leftover, unpaidVal);
-                allocation[component] = roundHalfUp(alloc);
-                leftover = roundHalfUp(leftover - alloc);
+                const alloc = Prisma.Decimal.min(leftover, unpaidVal);
+                allocation[component] = alloc;
+                leftover = leftover.minus(alloc);
             }
-            if (leftover > 0 && allocationOrder.length > 0) {
+            if (leftover.greaterThan(0) && allocationOrder.length > 0) {
                 const lastComponent = allocationOrder[allocationOrder.length - 1];
-                allocation[lastComponent] = roundHalfUp(allocation[lastComponent] + leftover);
+                allocation[lastComponent] = allocation[lastComponent].plus(leftover);
             }
 
             // Update the due
-            const newAmountPaid = roundHalfUp(amountPaidSoFar + paymentToApply);
-            const isPaid = newAmountPaid >= Number(due.totalDue) - 0.01;
+            const newAmountPaid = duePaidSoFar.plus(paymentToApply);
+            const isPaid = newAmountPaid.greaterThanOrEqualTo(dueTotal.minus(0.01));
 
             await tx.loanDue.update({
                 where: { id: due.id },
@@ -136,16 +158,24 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
                 },
             });
 
-            remaining = roundHalfUp(remaining - paymentToApply);
-            allocationDetails.push(allocation);
+            remaining = remaining.minus(paymentToApply);
+            
+            allocationDetails.push({
+                loanDueId: allocation.loanDueId,
+                dueSequence: allocation.dueSequence,
+                penalty: allocation.penalty.toNumber(),
+                interest: allocation.interest.toNumber(),
+                principal: allocation.principal.toNumber(),
+                total: allocation.total.toNumber(),
+            });
         }
 
         // Compute total principal paid in this payment
-        const totalPrincipalPaid = allocationDetails.reduce((sum, a) => sum + a.principal, 0);
+        const totalPrincipalPaid = allocationDetails.reduce((sum, a) => sum.plus(a.principal), new Prisma.Decimal(0));
 
         // Update loan outstanding
         const loan = await tx.loan.findUnique({ where: { id: loanId } });
-        const newOutstanding = roundHalfUp(Number(loan.outstandingPrincipal) - totalPrincipalPaid);
+        const newOutstanding = new Prisma.Decimal(loan.outstandingPrincipal).minus(totalPrincipalPaid);
 
         // Check if loan should be closed
         const unpaidDues = await tx.loanDue.count({
@@ -155,8 +185,8 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
         await tx.loan.update({
             where: { id: loanId },
             data: {
-                outstandingPrincipal: Math.max(0, newOutstanding),
-                status: unpaidDues === 0 && newOutstanding <= 0 ? 'closed' : 'active',
+                outstandingPrincipal: Prisma.Decimal.max(0, newOutstanding),
+                status: unpaidDues === 0 && newOutstanding.lessThanOrEqualTo(0) ? 'closed' : 'active',
             },
         });
 
@@ -167,7 +197,7 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
                 id: paymentId,
                 orgId,
                 loanId,
-                amount: Number(amount),
+                amount: paymentAmount.toNumber(),
                 paymentMethod,
                 referenceNumber,
                 allocationDetails: allocationDetails,
@@ -205,7 +235,7 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
             },
         });
 
-        return { payment, receipt, allocationDetails, creditBalance: roundHalfUp(remaining), customerId: loan.customerId };
+        return { payment, receipt, allocationDetails, creditBalance: remaining.toNumber(), customerId: loan.customerId };
     });
 
     if (result.isDuplicate) {

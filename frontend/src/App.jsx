@@ -22,6 +22,15 @@ function ProtectedRoute({ children }) {
     return children;
 }
 
+function RoleProtectedRoute({ children, allowedRoles }) {
+    const { user, isAuthenticated } = useAuth();
+    if (!isAuthenticated) return <Navigate to="/login" replace />;
+    if (allowedRoles && !allowedRoles.includes(user?.role)) {
+        return <Navigate to="/" replace />;
+    }
+    return children;
+}
+
 function AppRoutes() {
     return (
         <Routes>
@@ -39,13 +48,27 @@ function AppRoutes() {
                 <Route path="customers/:id/loans" element={<CustomerLoans />} />
                 <Route path="calls" element={<CallPanel />} />
                 <Route path="loans" element={<Loans />} />
-                <Route path="loans/new" element={<NewLoan />} />
+                <Route 
+                    path="loans/new" 
+                    element={
+                        <RoleProtectedRoute allowedRoles={['admin', 'accountant']}>
+                            <NewLoan />
+                        </RoleProtectedRoute>
+                    } 
+                />
                 <Route path="loans/:id" element={<LoanDetail />} />
                 <Route path="whatsapp" element={<WhatsAppPanel />} />
                 <Route path="vehicles" element={<VehicleInventory />} />
                 <Route path="customers" element={<Customers />} />
                 <Route path="reports" element={<Reports />} />
-                <Route path="admin" element={<AdminConfig />} />
+                <Route 
+                    path="admin" 
+                    element={
+                        <RoleProtectedRoute allowedRoles={['admin']}>
+                            <AdminConfig />
+                        </RoleProtectedRoute>
+                    } 
+                />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

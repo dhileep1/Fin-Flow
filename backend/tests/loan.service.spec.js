@@ -9,27 +9,27 @@ describe('Loan Service - generateSchedule', () => {
 
         const { monthlyPrincipal, monthlyInterest, dues } = generateSchedule(principal, tenure, rate, startDate);
 
-        expect(monthlyPrincipal).toBe(3333.33); // 10000 / 3 rounded
-        expect(monthlyInterest).toBe(100);     // 10000 * 0.01
+        expect(Number(monthlyPrincipal)).toBe(3333.33); // 10000 / 3 rounded
+        expect(Number(monthlyInterest)).toBe(100);     // 10000 * 0.01
         expect(dues.length).toBe(3);
 
         // Sequence 1
         expect(dues[0].dueSequence).toBe(1);
-        expect(dues[0].principalDue).toBe(3333.33);
-        expect(dues[0].interestDue).toBe(100);
-        expect(dues[0].totalDue).toBe(3433.33);
+        expect(Number(dues[0].principalDue)).toBe(3333.33);
+        expect(Number(dues[0].interestDue)).toBe(100);
+        expect(Number(dues[0].totalDue)).toBe(3433.33);
 
         // Sequence 2
         expect(dues[1].dueSequence).toBe(2);
-        expect(dues[1].principalDue).toBe(3333.33);
-        expect(dues[1].interestDue).toBe(100);
-        expect(dues[1].totalDue).toBe(3433.33);
+        expect(Number(dues[1].principalDue)).toBe(3333.33);
+        expect(Number(dues[1].interestDue)).toBe(100);
+        expect(Number(dues[1].totalDue)).toBe(3433.33);
 
         // Sequence 3 (Final installment absorbs rounding remainder)
         // Remainder: 10000 - (3333.33 * 2) = 10000 - 6666.66 = 3333.34
         expect(dues[2].dueSequence).toBe(3);
-        expect(dues[2].principalDue).toBe(3333.34);
-        expect(dues[2].interestDue).toBe(100);
-        expect(dues[2].totalDue).toBe(3433.34);
+        expect(Number(dues[2].principalDue)).toBe(3333.34);
+        expect(Number(dues[2].interestDue)).toBe(100);
+        expect(Number(dues[2].totalDue)).toBe(3433.34);
     });
 });

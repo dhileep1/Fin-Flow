@@ -1,4 +1,5 @@
 const prisma = require('../config/database');
+const { Prisma } = require('@prisma/client');
 const { roundHalfUp } = require('../utils/rounding');
 const { addMonths, formatDate } = require('../utils/dateUtils');
 const { logAudit } = require('./audit.service');
@@ -12,12 +13,12 @@ const { v4: uuidv4 } = require('uuid');
  *   - Final installment absorbs rounding remainder
  */
 function generateSchedule(principalAmount, tenureMonths, monthlyInterestRate, startDate) {
-    const P = Number(principalAmount);
+    const P = new Prisma.Decimal(principalAmount);
     const N = tenureMonths;
-    const r = Number(monthlyInterestRate);
+    const r = new Prisma.Decimal(monthlyInterestRate);
 
-    const monthlyPrincipal = roundHalfUp(P / N);
-    const monthlyInterest = roundHalfUp(P * r);
+    const monthlyPrincipal = new Prisma.Decimal(P.div(N).toFixed(2));
+    const monthlyInterest = new Prisma.Decimal(P.times(r).toFixed(2));
     const dues = [];
 
     for (let i = 1; i <= N; i++) {
@@ -26,10 +27,10 @@ function generateSchedule(principalAmount, tenureMonths, monthlyInterestRate, st
             principalDue = monthlyPrincipal;
         } else {
             // Final installment: absorb rounding remainder
-            principalDue = roundHalfUp(P - monthlyPrincipal * (N - 1));
+            principalDue = P.minus(monthlyPrincipal.times(N - 1));
         }
         const interestDue = monthlyInterest;
-        const totalDue = roundHalfUp(principalDue + interestDue);
+        const totalDue = principalDue.plus(interestDue);
         const dueDate = addMonths(new Date(startDate), i);
 
         dues.push({
@@ -37,8 +38,8 @@ function generateSchedule(principalAmount, tenureMonths, monthlyInterestRate, st
             dueDate,
             principalDue,
             interestDue,
-            penaltyDue: 0,
-            amountPaid: 0,
+            penaltyDue: new Prisma.Decimal(0),
+            amountPaid: new Prisma.Decimal(0),
             totalDue,
             status: 'upcoming',
         });
@@ -51,8 +52,8 @@ function generateSchedule(principalAmount, tenureMonths, monthlyInterestRate, st
  * Create a new loan with full schedule generation.
  */
 async function createLoan({ orgId, customerId, vehicleId, assignedStaffId, principalAmount, tenureMonths, monthlyInterestRate, startDate, userId }) {
-    const P = Number(principalAmount);
-    const r = Number(monthlyInterestRate);
+    const P = new Prisma.Decimal(principalAmount);
+    const r = new Prisma.Decimal(monthlyInterestRate);
     const N = tenureMonths;
 
     // Fetch organization settings for processing fee
@@ -60,15 +61,15 @@ async function createLoan({ orgId, customerId, vehicleId, assignedStaffId, princ
         where: { id: orgId }
     });
     const settings = org?.settings || {};
-    const docFeePercent = settings.documentFeePercent !== undefined ? Number(settings.documentFeePercent) : 0.05;
+    const docFeePercent = new Prisma.Decimal(settings.documentFeePercent !== undefined ? settings.documentFeePercent : 0.05);
 
     // Compute fees
-    const documentFee = roundHalfUp(P * docFeePercent);
-    const disbursedAmount = roundHalfUp(P - documentFee);
+    const documentFee = new Prisma.Decimal(P.times(docFeePercent).toFixed(2));
+    const disbursedAmount = P.minus(documentFee);
 
     // Generate schedule
     const { monthlyPrincipal, monthlyInterest, dues } = generateSchedule(P, N, r, startDate);
-    const monthlyDueAmount = roundHalfUp(monthlyPrincipal + monthlyInterest);
+    const monthlyDueAmount = monthlyPrincipal.plus(monthlyInterest);
 
     // First due date
     const firstDueDate = addMonths(new Date(startDate), 1);
@@ -93,7 +94,7 @@ async function createLoan({ orgId, customerId, vehicleId, assignedStaffId, princ
                 startDate: new Date(startDate),
                 nextDueDate: firstDueDate,
                 outstandingPrincipal: P,
-                accruedPenalty: 0,
+                accruedPenalty: new Prisma.Decimal(0),
                 documentFee,
                 disbursedAmount,
                 status: 'active',
@@ -138,7 +139,7 @@ async function createLoan({ orgId, customerId, vehicleId, assignedStaffId, princ
         action: 'loan_created',
         entityType: 'loan',
         entityId: loanId,
-        details: { principalAmount: P, tenureMonths: N, documentFee, disbursedAmount },
+        details: { principalAmount: P.toNumber(), tenureMonths: N, documentFee: documentFee.toNumber(), disbursedAmount: disbursedAmount.toNumber() },
     });
 
     // Fetch the full loan with dues
@@ -352,45 +353,45 @@ async function calculateForeclosureQuote(orgId, loanId, foreclosureRate) {
     elapsedMonths = Math.max(1, elapsedMonths);
     elapsedMonths = Math.min(loan.tenureMonths, elapsedMonths);
 
-    const P = Number(loan.principalAmount);
-    const rNew = Number(foreclosureRate);
-    const rOrig = Number(loan.monthlyInterestRate);
+    const P = new Prisma.Decimal(loan.principalAmount);
+    const rNew = new Prisma.Decimal(foreclosureRate);
+    const rOrig = new Prisma.Decimal(loan.monthlyInterestRate);
 
-    const monthlyInterestNew = roundHalfUp(P * rNew);
-    const totalInterestNew = roundHalfUp(monthlyInterestNew * elapsedMonths);
+    const monthlyInterestNew = new Prisma.Decimal(P.times(rNew).toFixed(2));
+    const totalInterestNew = new Prisma.Decimal(monthlyInterestNew.times(elapsedMonths).toFixed(2));
 
-    const monthlyInterestOrig = Number(loan.monthlyInterestAmount);
-    const totalInterestOrig = roundHalfUp(monthlyInterestOrig * elapsedMonths);
+    const monthlyInterestOrig = new Prisma.Decimal(loan.monthlyInterestAmount);
+    const totalInterestOrig = new Prisma.Decimal(monthlyInterestOrig.times(elapsedMonths).toFixed(2));
 
     // Get total penalties accrued
     const totalPenaltiesObj = await prisma.penalty.aggregate({
         where: { loanDue: { loanId } },
         _sum: { penaltyAmount: true }
     });
-    const totalPenalties = Number(totalPenaltiesObj._sum.penaltyAmount || 0);
+    const totalPenalties = new Prisma.Decimal(totalPenaltiesObj._sum.penaltyAmount || 0);
 
     // Get total paid so far
     const totalPaidObj = await prisma.payment.aggregate({
         where: { loanId },
         _sum: { amount: true }
     });
-    const totalPaid = Number(totalPaidObj._sum.amount || 0);
+    const totalPaid = new Prisma.Decimal(totalPaidObj._sum.amount || 0);
 
-    const totalLiability = roundHalfUp(P + totalInterestNew + totalPenalties);
-    const foreclosureAmount = Math.max(0, roundHalfUp(totalLiability - totalPaid));
+    const totalLiability = P.plus(totalInterestNew).plus(totalPenalties);
+    const foreclosureAmount = Prisma.Decimal.max(0, totalLiability.minus(totalPaid));
 
     return {
-        principal: P,
+        principal: P.toNumber(),
         elapsedMonths,
-        originalRate: rOrig,
-        newRate: rNew,
-        originalInterestAccrued: totalInterestOrig,
-        newInterestAccrued: totalInterestNew,
-        interestDifference: roundHalfUp(totalInterestNew - totalInterestOrig),
-        totalPenalties,
-        totalPaid,
-        totalLiability,
-        foreclosureAmount
+        originalRate: rOrig.toNumber(),
+        newRate: rNew.toNumber(),
+        originalInterestAccrued: totalInterestOrig.toNumber(),
+        newInterestAccrued: totalInterestNew.toNumber(),
+        interestDifference: totalInterestNew.minus(totalInterestOrig).toNumber(),
+        totalPenalties: totalPenalties.toNumber(),
+        totalPaid: totalPaid.toNumber(),
+        totalLiability: totalLiability.toNumber(),
+        foreclosureAmount: foreclosureAmount.toNumber()
     };
 }
 
@@ -398,8 +399,20 @@ async function calculateForeclosureQuote(orgId, loanId, foreclosureRate) {
  * Execute foreclosure transaction.
  */
 async function executeForeclosure(orgId, loanId, { foreclosureRate, paymentMethod, referenceNumber, createdBy, paymentDate }) {
+    if (paymentDate) {
+        const payDate = new Date(paymentDate);
+        const now = new Date();
+        if (payDate.getTime() > now.getTime() + 5 * 60 * 1000) {
+            throw new Error('Payment date cannot be in the future');
+        }
+        const maxPastAllowed = 3 * 24 * 60 * 60 * 1000;
+        if (now.getTime() - payDate.getTime() > maxPastAllowed) {
+            throw new Error('Payment date cannot be backdated by more than 3 days');
+        }
+    }
+
     const quote = await calculateForeclosureQuote(orgId, loanId, foreclosureRate);
-    const amount = quote.foreclosureAmount;
+    const amount = new Prisma.Decimal(quote.foreclosureAmount);
 
     return prisma.$transaction(async (tx) => {
         // 1. Delete future dues
@@ -416,35 +429,45 @@ async function executeForeclosure(orgId, loanId, { foreclosureRate, paymentMetho
             orderBy: { dueSequence: 'asc' }
         });
 
-        const P = Number(quote.principal);
-        const monthlyPrincipal = roundHalfUp(P / quote.elapsedMonths);
-        const rNew = Number(foreclosureRate);
-        const monthlyInterestNew = roundHalfUp(P * rNew);
+        const P = new Prisma.Decimal(quote.principal);
+        const monthlyPrincipal = new Prisma.Decimal(P.div(quote.elapsedMonths).toFixed(2));
+        const rNew = new Prisma.Decimal(foreclosureRate);
+        const monthlyInterestNew = new Prisma.Decimal(P.times(rNew).toFixed(2));
 
+        // Re-allocate existing totalPaid across the adjusted dues sequence
+        let remainingPaid = new Prisma.Decimal(quote.totalPaid);
         for (const due of dues) {
             let principalDue;
             if (due.dueSequence < quote.elapsedMonths) {
                 principalDue = monthlyPrincipal;
             } else {
-                principalDue = roundHalfUp(P - monthlyPrincipal * (quote.elapsedMonths - 1));
+                principalDue = P.minus(monthlyPrincipal.times(quote.elapsedMonths - 1));
             }
             const interestDue = monthlyInterestNew;
-            const penaltyDue = Number(due.penaltyDue);
-            const totalDue = roundHalfUp(principalDue + interestDue + penaltyDue);
+            const penaltyDue = new Prisma.Decimal(due.penaltyDue);
+            const totalDue = principalDue.plus(interestDue).plus(penaltyDue);
+
+            const allocated = Prisma.Decimal.min(remainingPaid, totalDue);
+            const amountPaid = allocated;
+            const status = amountPaid.greaterThanOrEqualTo(totalDue.minus(0.01)) ? 'paid' : (amountPaid.greaterThan(0) ? 'pending' : 'upcoming');
 
             await tx.loanDue.update({
                 where: { id: due.id },
                 data: {
                     principalDue,
                     interestDue,
-                    totalDue
+                    totalDue,
+                    amountPaid,
+                    status
                 }
             });
+
+            remainingPaid = remainingPaid.minus(allocated);
         }
 
         // 3. Record foreclosure payment if amount > 0
         let paymentResult = null;
-        if (amount > 0) {
+        if (amount.greaterThan(0)) {
             const allocationDetails = [];
             let remaining = amount;
 
@@ -454,70 +477,89 @@ async function executeForeclosure(orgId, loanId, { foreclosureRate, paymentMetho
             });
 
             for (const due of updatedDues) {
-                if (remaining <= 0) break;
-                const dueRemaining = roundHalfUp(Number(due.totalDue) - Number(due.amountPaid));
-                if (dueRemaining <= 0) continue;
+                if (remaining.lessThanOrEqualTo(0)) break;
+                const dueTotal = new Prisma.Decimal(due.totalDue);
+                const duePaid = new Prisma.Decimal(due.amountPaid);
+                const dueRemaining = dueTotal.minus(duePaid);
+                if (dueRemaining.lessThanOrEqualTo(0)) continue;
 
                 const allocation = {
                     loanDueId: due.id,
                     dueSequence: due.dueSequence,
-                    penalty: 0,
-                    interest: 0,
-                    principal: 0,
-                    total: 0,
+                    penalty: new Prisma.Decimal(0),
+                    interest: new Prisma.Decimal(0),
+                    principal: new Prisma.Decimal(0),
+                    total: new Prisma.Decimal(0),
                 };
 
-                if (remaining >= dueRemaining) {
+                if (remaining.greaterThanOrEqualTo(dueRemaining)) {
                     allocation.total = dueRemaining;
 
                     let leftover = dueRemaining;
-                    const penaltyRemaining = roundHalfUp(Number(due.penaltyDue) - Math.max(0, Number(due.amountPaid) - Number(due.principalDue) - Number(due.interestDue)));
-                    const penaltyAlloc = Math.min(leftover, Math.max(0, penaltyRemaining));
-                    allocation.penalty = roundHalfUp(penaltyAlloc);
-                    leftover -= penaltyAlloc;
+                    // penalty remaining
+                    const penaltyDue = new Prisma.Decimal(due.penaltyDue);
+                    const principalDue = new Prisma.Decimal(due.principalDue);
+                    const interestDue = new Prisma.Decimal(due.interestDue);
 
-                    const interestAlloc = Math.min(leftover, Number(due.interestDue));
-                    allocation.interest = roundHalfUp(interestAlloc);
-                    leftover -= interestAlloc;
+                    const paidDiff = duePaid.minus(principalDue).minus(interestDue);
+                    const penaltyPaid = Prisma.Decimal.max(0, paidDiff);
+                    const penaltyRemaining = Prisma.Decimal.max(0, penaltyDue.minus(penaltyPaid));
 
-                    allocation.principal = roundHalfUp(leftover);
+                    const penaltyAlloc = Prisma.Decimal.min(leftover, penaltyRemaining);
+                    allocation.penalty = penaltyAlloc;
+                    leftover = leftover.minus(penaltyAlloc);
+
+                    const interestAlloc = Prisma.Decimal.min(leftover, interestDue);
+                    allocation.interest = interestAlloc;
+                    leftover = leftover.minus(interestAlloc);
+
+                    allocation.principal = leftover;
 
                     await tx.loanDue.update({
                         where: { id: due.id },
                         data: {
-                            amountPaid: Number(due.totalDue),
+                            amountPaid: dueTotal,
                             status: 'paid'
                         }
                     });
 
-                    remaining = roundHalfUp(remaining - dueRemaining);
+                    remaining = remaining.minus(dueRemaining);
                 } else {
-                    allocation.total = roundHalfUp(remaining);
+                    allocation.total = remaining;
 
                     let leftover = remaining;
-                    const penaltyUnpaid = roundHalfUp(Math.max(0, Number(due.penaltyDue)));
-                    const penaltyAlloc = Math.min(leftover, penaltyUnpaid);
-                    allocation.penalty = roundHalfUp(penaltyAlloc);
-                    leftover = roundHalfUp(leftover - penaltyAlloc);
+                    const penaltyDue = new Prisma.Decimal(due.penaltyDue);
+                    const interestDue = new Prisma.Decimal(due.interestDue);
 
-                    const interestUnpaid = Number(due.interestDue);
-                    const interestAlloc = Math.min(leftover, interestUnpaid);
-                    allocation.interest = roundHalfUp(interestAlloc);
-                    leftover = roundHalfUp(leftover - interestAlloc);
+                    const penaltyAlloc = Prisma.Decimal.min(leftover, penaltyDue);
+                    allocation.penalty = penaltyAlloc;
+                    leftover = leftover.minus(penaltyAlloc);
 
-                    allocation.principal = roundHalfUp(leftover);
+                    const interestAlloc = Prisma.Decimal.min(leftover, interestDue);
+                    allocation.interest = interestAlloc;
+                    leftover = leftover.minus(interestAlloc);
+
+                    allocation.principal = leftover;
 
                     await tx.loanDue.update({
                         where: { id: due.id },
                         data: {
-                            amountPaid: roundHalfUp(Number(due.amountPaid) + remaining),
+                            amountPaid: duePaid.plus(remaining),
                             status: 'pending'
                         }
                     });
 
-                    remaining = 0;
+                    remaining = new Prisma.Decimal(0);
                 }
-                allocationDetails.push(allocation);
+
+                allocationDetails.push({
+                    loanDueId: allocation.loanDueId,
+                    dueSequence: allocation.dueSequence,
+                    penalty: allocation.penalty.toNumber(),
+                    interest: allocation.interest.toNumber(),
+                    principal: allocation.principal.toNumber(),
+                    total: allocation.total.toNumber(),
+                });
             }
 
             const paymentId = uuidv4();
@@ -526,7 +568,7 @@ async function executeForeclosure(orgId, loanId, { foreclosureRate, paymentMetho
                     id: paymentId,
                     orgId,
                     loanId,
-                    amount,
+                    amount: amount.toNumber(),
                     paymentMethod,
                     referenceNumber,
                     allocationDetails: allocationDetails,
@@ -535,7 +577,26 @@ async function executeForeclosure(orgId, loanId, { foreclosureRate, paymentMetho
                 }
             });
 
-            const receiptNumber = `RCP-${Date.now()}-${paymentId.slice(0, 8).toUpperCase()}`;
+            // Increment and update receipt sequence
+            const org = await tx.organization.findUnique({ where: { id: orgId } });
+            const settings = org?.settings || {};
+            const lastSeq = settings.lastReceiptSequence !== undefined ? Number(settings.lastReceiptSequence) : 0;
+            const nextSeq = lastSeq + 1;
+            await tx.organization.update({
+                where: { id: orgId },
+                data: {
+                    settings: {
+                        ...settings,
+                        lastReceiptSequence: nextSeq
+                    }
+                }
+            });
+
+            // Generate sequential unique receipt number
+            const shortOrgCode = org.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase().padEnd(3, 'X');
+            const paddedSeq = String(nextSeq).padStart(6, '0');
+            const receiptNumber = `RCP-${shortOrgCode}-${paddedSeq}`;
+
             await tx.receipt.create({
                 data: {
                     id: uuidv4(),
@@ -559,10 +620,10 @@ async function executeForeclosure(orgId, loanId, { foreclosureRate, paymentMetho
             data: {
                 tenureMonths: quote.elapsedMonths,
                 monthlyInterestRate: quote.newRate,
-                monthlyInterestAmount: roundHalfUp(P * quote.newRate),
-                monthlyPrincipalAmount: roundHalfUp(P / quote.elapsedMonths),
-                monthlyDueAmount: roundHalfUp(roundHalfUp(P / quote.elapsedMonths) + roundHalfUp(P * quote.newRate)),
-                outstandingPrincipal: 0,
+                monthlyInterestAmount: monthlyInterestNew,
+                monthlyPrincipalAmount: monthlyPrincipal,
+                monthlyDueAmount: monthlyPrincipal.plus(monthlyInterestNew),
+                outstandingPrincipal: new Prisma.Decimal(0),
                 status: 'closed'
             }
         });
@@ -574,7 +635,7 @@ async function executeForeclosure(orgId, loanId, { foreclosureRate, paymentMetho
             action: 'loan_foreclosed',
             entityType: 'loan',
             entityId: loanId,
-            details: { quote, amount }
+            details: { quote, amount: amount.toNumber() }
         });
 
         return { loan, payment: paymentResult };

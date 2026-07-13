@@ -6,6 +6,21 @@ const dateStringSchema = z.string().refine((val) => !isNaN(Date.parse(val)), {
     message: "Invalid date format",
 });
 
+const paymentDateSchema = z.string()
+    .refine((val) => !isNaN(Date.parse(val)), { message: "Invalid date format" })
+    .refine((val) => {
+        const payDate = new Date(val);
+        const now = new Date();
+        return payDate.getTime() <= now.getTime() + 5 * 60 * 1000;
+    }, { message: "Payment date cannot be in the future" })
+    .refine((val) => {
+        const payDate = new Date(val);
+        const now = new Date();
+        const maxPastAllowed = 3 * 24 * 60 * 60 * 1000;
+        return now.getTime() - payDate.getTime() <= maxPastAllowed;
+    }, { message: "Payment date cannot be backdated by more than 3 days" })
+    .optional();
+
 // Auth schemas
 const loginSchema = z.object({
     body: z.object({
@@ -116,7 +131,7 @@ const forecloseLoanSchema = z.object({
             errorMap: () => ({ message: "Invalid payment method" })
         }),
         referenceNumber: z.string().optional().nullable(),
-        paymentDate: dateStringSchema.optional(),
+        paymentDate: paymentDateSchema,
     }),
 });
 
@@ -127,7 +142,7 @@ const createPaymentSchema = z.object({
         amount: z.number().positive("Payment amount must be positive"),
         paymentMethod: z.enum(["cash", "upi", "bank", "cheque", "card"]).optional(),
         referenceNumber: z.string().optional().nullable(),
-        paymentDate: dateStringSchema.optional(),
+        paymentDate: paymentDateSchema,
     }),
 });
 

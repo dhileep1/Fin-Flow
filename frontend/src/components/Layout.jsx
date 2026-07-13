@@ -183,186 +183,190 @@ export default function Layout() {
                 {/* Right: CTAs + icons */}
                 <div className="navbar-right">
                     {/* Primary CTA */}
-                    <button
-                        className="navbar-cta navbar-cta-primary"
-                        onClick={() => navigate('/loans/new')}
-                        title="New Loan"
-                        aria-label="Create new loan"
-                    >
-                        <PlusCircle size={18} />
-                        <span className="navbar-cta-label">New Loan</span>
-                    </button>
+                    {['admin', 'accountant'].includes(user?.role) && (
+                        <button
+                            className="navbar-cta navbar-cta-primary"
+                            onClick={() => navigate('/loans/new')}
+                            title="New Loan"
+                            aria-label="Create new loan"
+                        >
+                            <PlusCircle size={18} />
+                            <span className="navbar-cta-label">New Loan</span>
+                        </button>
+                    )}
 
                     {/* Inline Payment Widget */}
-                    <div className={`inline-pay-wrapper ${isInlineOpen ? 'is-open' : ''}`} ref={inlineRef}>
-                        <button
-                            className="navbar-cta navbar-cta-secondary inline-pay-trigger-btn"
-                            onClick={() => {
-                                setIsInlineOpen(true);
-                                setInlineStep('search');
-                            }}
-                            title="Record Payment"
-                            aria-label="Record a payment"
-                            style={{
-                                opacity: isInlineOpen ? 0 : 1,
-                                pointerEvents: isInlineOpen ? 'none' : 'auto',
-                                position: isInlineOpen ? 'absolute' : 'relative',
-                                width: '100%'
-                            }}
-                        >
-                            <IndianRupee size={18} />
-                            <span className="navbar-cta-label">Payment</span>
-                        </button>
+                    {user?.role !== 'viewer' && (
+                        <div className={`inline-pay-wrapper ${isInlineOpen ? 'is-open' : ''}`} ref={inlineRef}>
+                            <button
+                                className="navbar-cta navbar-cta-secondary inline-pay-trigger-btn"
+                                onClick={() => {
+                                    setIsInlineOpen(true);
+                                    setInlineStep('search');
+                                }}
+                                title="Record Payment"
+                                aria-label="Record a payment"
+                                style={{
+                                    opacity: isInlineOpen ? 0 : 1,
+                                    pointerEvents: isInlineOpen ? 'none' : 'auto',
+                                    position: isInlineOpen ? 'absolute' : 'relative',
+                                    width: '100%'
+                                }}
+                            >
+                                <IndianRupee size={18} />
+                                <span className="navbar-cta-label">Payment</span>
+                            </button>
 
-                        {isInlineOpen && (
-                            <div className="inline-pay-panel">
-                                {inlineStep === 'search' ? (
-                                    <>
-                                        <div className="inline-pay-input-row">
-                                            <IndianRupee size={16} className="inline-pay-search-icon" />
-                                            <input
-                                                type="text"
-                                                className="inline-pay-panel-input"
-                                                placeholder="Search loan..."
-                                                value={inlineQuery}
-                                                onChange={(e) => setInlineQuery(e.target.value)}
-                                                autoFocus
-                                            />
-                                            {loadingLoan && <span className="inline-pay-spinner" />}
-                                            <button 
-                                                type="button" 
-                                                className="inline-pay-panel-close" 
-                                                onClick={() => { setIsInlineOpen(false); resetInlineState(); }}
-                                            >
-                                                ✕
-                                            </button>
-                                        </div>
-                                        {/* Suggestions list */}
-                                        {inlineQuery.trim().length >= 2 && (
-                                            <div className="inline-pay-suggestions">
-                                                {loadingLoan ? (
-                                                    <div className="inline-pay-dropdown-loading">Searching...</div>
-                                                ) : inlineResults && inlineResults.loans && inlineResults.loans.length > 0 ? (
-                                                    inlineResults.loans.slice(0, 5).map((l) => (
-                                                        <div
-                                                            key={l.id}
-                                                            className="inline-pay-row"
-                                                            onClick={() => handleSelectLoan(l)}
-                                                        >
-                                                            <div className="inline-pay-row-left">
-                                                                <div className="inline-pay-customer-name">{l.customer?.name}</div>
-                                                                <div className="inline-pay-subtext">
-                                                                    {l.vehicle?.vehicleNumber || 'No Vehicle'} · {l.customer?.phone}
+                            {isInlineOpen && (
+                                <div className="inline-pay-panel">
+                                    {inlineStep === 'search' ? (
+                                        <>
+                                            <div className="inline-pay-input-row">
+                                                <IndianRupee size={16} className="inline-pay-search-icon" />
+                                                <input
+                                                    type="text"
+                                                    className="inline-pay-panel-input"
+                                                    placeholder="Search loan..."
+                                                    value={inlineQuery}
+                                                    onChange={(e) => setInlineQuery(e.target.value)}
+                                                    autoFocus
+                                                />
+                                                {loadingLoan && <span className="inline-pay-spinner" />}
+                                                <button 
+                                                    type="button" 
+                                                    className="inline-pay-panel-close" 
+                                                    onClick={() => { setIsInlineOpen(false); resetInlineState(); }}
+                                                >
+                                                    ✕
+                                                </button>
+                                            </div>
+                                            {/* Suggestions list */}
+                                            {inlineQuery.trim().length >= 2 && (
+                                                <div className="inline-pay-suggestions">
+                                                    {loadingLoan ? (
+                                                        <div className="inline-pay-dropdown-loading">Searching...</div>
+                                                    ) : inlineResults && inlineResults.loans && inlineResults.loans.length > 0 ? (
+                                                        inlineResults.loans.slice(0, 5).map((l) => (
+                                                            <div
+                                                                key={l.id}
+                                                                className="inline-pay-row"
+                                                                onClick={() => handleSelectLoan(l)}
+                                                            >
+                                                                <div className="inline-pay-row-left">
+                                                                    <div className="inline-pay-customer-name">{l.customer?.name}</div>
+                                                                    <div className="inline-pay-subtext">
+                                                                        {l.vehicle?.vehicleNumber || 'No Vehicle'} · {l.customer?.phone}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="inline-pay-row-right">
+                                                                    <div className="inline-pay-subtext-right">O/S</div>
+                                                                    <div className="inline-pay-amount-label">₹{Number(l.outstandingPrincipal || 0).toLocaleString('en-IN')}</div>
                                                                 </div>
                                                             </div>
-                                                            <div className="inline-pay-row-right">
-                                                                <div className="inline-pay-subtext-right">O/S</div>
-                                                                <div className="inline-pay-amount-label">₹{Number(l.outstandingPrincipal || 0).toLocaleString('en-IN')}</div>
+                                                        ))
+                                                    ) : inlineResults ? (
+                                                        <div className="inline-pay-dropdown-empty">No loans found</div>
+                                                    ) : null}
+                                                </div>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="inline-pay-input-row inline-pay-pill-row">
+                                                <IndianRupee size={16} className="inline-pay-pill-icon" />
+                                                <span className="inline-pay-pill-text">Paying {selectedLoan?.customer?.name}</span>
+                                                <button 
+                                                    type="button" 
+                                                    className="inline-pay-panel-close" 
+                                                    onClick={() => { setIsInlineOpen(false); resetInlineState(); }}
+                                                >
+                                                    ✕
+                                                </button>
+                                            </div>
+                                            <div className="inline-pay-details-content">
+                                                <div className="inline-pay-info-box">
+                                                    <div className="inline-pay-info-name">{selectedLoan?.customer?.name}</div>
+                                                    <div className="inline-pay-info-os">O/S: ₹{Number(selectedLoan?.outstandingPrincipal || 0).toLocaleString('en-IN')}</div>
+                                                </div>
+                                                
+                                                {error && <div className="inline-pay-error">{error}</div>}
+                                                {successMsg && <div className="inline-pay-success">{successMsg}</div>}
+
+                                                {!successMsg && (
+                                                    <>
+                                                        <div className="inline-pay-form-group">
+                                                            <label className="inline-pay-field-label">Amount</label>
+                                                            <div className="inline-pay-input-wrapper">
+                                                                <span className="inline-pay-field-currency">₹</span>
+                                                                <input
+                                                                    type="number"
+                                                                    className="inline-pay-field-input"
+                                                                    placeholder="Enter amount"
+                                                                    value={amount}
+                                                                    onChange={(e) => setAmount(e.target.value)}
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === 'Enter') handleInlineSubmit();
+                                                                    }}
+                                                                    autoFocus
+                                                                />
                                                             </div>
                                                         </div>
-                                                    ))
-                                                ) : inlineResults ? (
-                                                    <div className="inline-pay-dropdown-empty">No loans found</div>
-                                                ) : null}
-                                            </div>
-                                        )}
-                                    </>
-                                ) : (
-                                    <>
-                                        <div className="inline-pay-input-row inline-pay-pill-row">
-                                            <IndianRupee size={16} className="inline-pay-pill-icon" />
-                                            <span className="inline-pay-pill-text">Paying {selectedLoan?.customer?.name}</span>
-                                            <button 
-                                                type="button" 
-                                                className="inline-pay-panel-close" 
-                                                onClick={() => { setIsInlineOpen(false); resetInlineState(); }}
-                                            >
-                                                ✕
-                                            </button>
-                                        </div>
-                                        <div className="inline-pay-details-content">
-                                            <div className="inline-pay-info-box">
-                                                <div className="inline-pay-info-name">{selectedLoan?.customer?.name}</div>
-                                                <div className="inline-pay-info-os">O/S: ₹{Number(selectedLoan?.outstandingPrincipal || 0).toLocaleString('en-IN')}</div>
-                                            </div>
-                                            
-                                            {error && <div className="inline-pay-error">{error}</div>}
-                                            {successMsg && <div className="inline-pay-success">{successMsg}</div>}
 
-                                            {!successMsg && (
-                                                <>
-                                                    <div className="inline-pay-form-group">
-                                                        <label className="inline-pay-field-label">Amount</label>
-                                                        <div className="inline-pay-input-wrapper">
-                                                            <span className="inline-pay-field-currency">₹</span>
+                                                        <div className="inline-pay-form-group">
+                                                            <label className="inline-pay-field-label">Payment Type</label>
+                                                            <div className="inline-pay-methods-row">
+                                                                <button
+                                                                    type="button"
+                                                                    className={`inline-pay-method-btn ${paymentMethod === 'cash' ? 'active' : ''}`}
+                                                                    onClick={() => setPaymentMethod('cash')}
+                                                                >
+                                                                    Cash
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className={`inline-pay-method-btn ${paymentMethod === 'upi' ? 'active' : ''}`}
+                                                                    onClick={() => setPaymentMethod('upi')}
+                                                                >
+                                                                    UPI
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className={`inline-pay-method-btn ${paymentMethod === 'bank' ? 'active' : ''}`}
+                                                                    onClick={() => setPaymentMethod('bank')}
+                                                                >
+                                                                    Bank
+                                                                </button>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="inline-pay-form-group">
+                                                            <label className="inline-pay-field-label">Payment Date & Time</label>
                                                             <input
-                                                                type="number"
-                                                                className="inline-pay-field-input"
-                                                                placeholder="Enter amount"
-                                                                value={amount}
-                                                                onChange={(e) => setAmount(e.target.value)}
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === 'Enter') handleInlineSubmit();
-                                                                }}
-                                                                autoFocus
+                                                                type="datetime-local"
+                                                                className="inline-pay-datetime-input"
+                                                                value={paymentDate}
+                                                                onChange={(e) => setPaymentDate(e.target.value)}
                                                             />
                                                         </div>
-                                                    </div>
 
-                                                    <div className="inline-pay-form-group">
-                                                        <label className="inline-pay-field-label">Payment Type</label>
-                                                        <div className="inline-pay-methods-row">
-                                                            <button
-                                                                type="button"
-                                                                className={`inline-pay-method-btn ${paymentMethod === 'cash' ? 'active' : ''}`}
-                                                                onClick={() => setPaymentMethod('cash')}
-                                                            >
-                                                                Cash
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                className={`inline-pay-method-btn ${paymentMethod === 'upi' ? 'active' : ''}`}
-                                                                onClick={() => setPaymentMethod('upi')}
-                                                            >
-                                                                UPI
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                className={`inline-pay-method-btn ${paymentMethod === 'bank' ? 'active' : ''}`}
-                                                                onClick={() => setPaymentMethod('bank')}
-                                                            >
-                                                                Bank
-                                                            </button>
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="inline-pay-form-group">
-                                                        <label className="inline-pay-field-label">Payment Date & Time</label>
-                                                        <input
-                                                            type="datetime-local"
-                                                            className="inline-pay-datetime-input"
-                                                            value={paymentDate}
-                                                            onChange={(e) => setPaymentDate(e.target.value)}
-                                                        />
-                                                    </div>
-
-                                                    <button
-                                                        type="button"
-                                                        className="inline-pay-submit-btn"
-                                                        onClick={handleInlineSubmit}
-                                                        disabled={submitting}
-                                                        style={{ marginTop: 'var(--space-2)' }}
-                                                    >
-                                                        {submitting ? 'Recording...' : `Record Payment`}
-                                                    </button>
-                                                </>
-                                            )}
-                                        </div>
-                                    </>
-                                )}
-                            </div>
-                        )}
-                    </div>
+                                                        <button
+                                                            type="button"
+                                                            className="inline-pay-submit-btn"
+                                                            onClick={handleInlineSubmit}
+                                                            disabled={submitting}
+                                                            style={{ marginTop: 'var(--space-2)' }}
+                                                        >
+                                                            {submitting ? 'Recording...' : `Record Payment`}
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     <div className="navbar-divider" aria-hidden="true" />
 
