@@ -20,6 +20,26 @@ router.get('/settings', requireRole('admin'), async (req, res, next) => {
 router.put('/settings', requireRole('admin'), async (req, res, next) => {
     try {
         const { name, phone, address, startingCash, penaltyRate, documentFeePercent, gracePeriodDays, allocationOrder } = req.body;
+        
+        if (penaltyRate !== undefined) {
+            const pRate = Number(penaltyRate);
+            if (pRate < 0 || pRate > 0.002) {
+                return res.status(400).json({ error: 'Penalty rate must be between 0 and 0.002 (daily rate)' });
+            }
+        }
+        if (documentFeePercent !== undefined) {
+            const dPercent = Number(documentFeePercent);
+            if (dPercent < 0 || dPercent > 0.10) {
+                return res.status(400).json({ error: 'Document fee percent must be between 0 and 0.10 (10%)' });
+            }
+        }
+        if (gracePeriodDays !== undefined) {
+            const graceDays = Number(gracePeriodDays);
+            if (graceDays < 0 || graceDays > 90) {
+                return res.status(400).json({ error: 'Grace period days must be between 0 and 90' });
+            }
+        }
+
         const oldOrg = await prisma.organization.findUnique({
             where: { id: req.orgId }
         });
@@ -352,7 +372,6 @@ router.post('/audit-logs/:id/revert', requireRole('admin'), async (req, res, nex
 
             return res.json({ success: true, message: 'Loan update successfully reverted.' });
         }
-
         if (log.action === 'payment_recorded') {
             const paymentId = log.entityId;
             if (!paymentId) return res.status(400).json({ error: 'Invalid entity ID in audit log' });
@@ -365,13 +384,17 @@ router.post('/audit-logs/:id/revert', requireRole('admin'), async (req, res, nex
             const allocationDetails = payment.allocationDetails || [];
             const loanId = payment.loanId;
 
+            const receipts = await prisma.receipt.findMany({
+                where: { paymentId, orgId: req.orgId }
+            });
+
             await prisma.$transaction(async (tx) => {
                 for (const alloc of allocationDetails) {
                     const due = await tx.loanDue.findUnique({ where: { id: alloc.loanDueId } });
                     if (due) {
                         const newAmountPaid = Math.max(0, Number(due.amountPaid) - Number(alloc.total));
                         const isOverdue = new Date(due.dueDate) < new Date();
-                        const newStatus = newAmountPaid <= 0 ? (isOverdue ? 'pending' : 'upcoming') : 'pending';
+                        const newStatus = newAmountPaid <= 0 ? (isOverdue ? 'overdue' : 'upcoming') : (isOverdue ? 'overdue' : 'pending');
 
                         await tx.loanDue.update({
                             where: { id: due.id },
@@ -398,6 +421,32 @@ router.post('/audit-logs/:id/revert', requireRole('admin'), async (req, res, nex
                 await tx.receipt.deleteMany({ where: { paymentId, orgId: req.orgId } });
                 await tx.payment.delete({ where: { id: paymentId } });
             });
+
+            // S3 receipt deletion cascade
+            const receiptService = require('../services/receipt.service');
+            for (const r of receipts) {
+                await receiptService.deleteReceiptFromS3(r.id).catch(err => {
+                    console.error(`Failed to delete receipt ${r.id} from S3:`, err);
+                });
+            }
+
+            // Notify customer of payment reversal
+            const loan = await prisma.loan.findFirst({
+                where: { id: loanId, orgId: req.orgId },
+                include: { customer: true }
+            });
+            if (loan && loan.customer) {
+                const { sendNotification } = require('../services/notification.service');
+                await sendNotification({
+                    orgId: req.orgId,
+                    customerId: loan.customer.id,
+                    loanId: loan.id,
+                    type: 'manual',
+                    messageBody: `Dear ${loan.customer.name}, your payment of ₹${Number(payment.amount).toFixed(2)} recorded on ${new Date(payment.paymentDate).toLocaleDateString('en-IN')} has been reverted.`
+                }).catch(err => {
+                    console.error('Failed to send payment reversal notification:', err);
+                });
+            }
 
             const { logAudit } = require('../services/audit.service');
             await logAudit({
@@ -688,7 +737,12 @@ router.put('/audit-logs/entity/:entityType/:entityId', requireRole('admin'), asy
                     );
 
                     const P = Number(updatedLoan.principalAmount);
-                    const documentFee = P * 0.05;
+                    const org = await tx.organization.findUnique({
+                        where: { id: req.orgId }
+                    });
+                    const settings = org?.settings || {};
+                    const docFeePercent = settings.documentFeePercent !== undefined ? Number(settings.documentFeePercent) : 0.05;
+                    const documentFee = P * docFeePercent;
                     const disbursedAmount = P - documentFee;
 
                     const finalLoan = await tx.loan.update({

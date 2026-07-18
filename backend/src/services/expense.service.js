@@ -19,14 +19,27 @@ async function createExpense({ orgId, amount, category, description, tags, creat
     });
 }
 
-async function getExpenses(orgId) {
-    return prisma.expense.findMany({
-        where: { orgId },
-        include: {
-            creator: { select: { name: true } }
-        },
-        orderBy: { expenseDate: 'desc' }
-    });
+async function getExpenses(orgId, { page = 1, limit = 25 } = {}) {
+    const skip = (page - 1) * limit;
+    const [expenses, total] = await Promise.all([
+        prisma.expense.findMany({
+            where: { orgId },
+            skip,
+            take: limit,
+            include: {
+                creator: { select: { name: true } }
+            },
+            orderBy: { expenseDate: 'desc' }
+        }),
+        prisma.expense.count({ where: { orgId } })
+    ]);
+    return {
+        expenses,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+    };
 }
 
 module.exports = { createExpense, getExpenses };

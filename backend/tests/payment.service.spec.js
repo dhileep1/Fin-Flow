@@ -72,6 +72,7 @@ jest.mock('../src/config/database', () => {
 describe('Payment Service - recordPayment', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockTx.loan.findUnique.mockResolvedValue({ id: 'loan-1', outstandingPrincipal: 1000, status: 'active' });
     });
 
     it('should reject payment if the amount exceeds the total outstanding balance plus tolerance', async () => {

@@ -57,7 +57,8 @@ async function accrueDailyPenalties(orgId = null) {
                     where: { id: currentDue.orgId }
                 });
                 const settings = org?.settings || {};
-                const penaltyRate = new Prisma.Decimal(settings.penaltyRate !== undefined ? settings.penaltyRate : 0.00002);
+                const rawRate = settings.penaltyRate !== undefined ? Number(settings.penaltyRate) : 0.00002;
+                const penaltyRate = new Prisma.Decimal(Math.min(rawRate, 0.002));
                 const gracePeriodDays = settings.gracePeriodDays !== undefined ? Number(settings.gracePeriodDays) : 0;
 
                 const dailyPenalty = new Prisma.Decimal(pendingDue.times(penaltyRate).toFixed(2));

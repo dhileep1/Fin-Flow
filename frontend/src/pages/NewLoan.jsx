@@ -213,11 +213,19 @@ export default function NewLoan() {
         setSelectedCustomer(customer);
         setCustomerResults([]);
         setCustomerQuery(customer.name);
-        setSelectedVehicleId('');
-        setVehicles([]);
         setShowNewCustomer(false);
         setError('');
 
+        // If we have a pre-selected vehicle from resale, preserve it and skip loading customer vehicles
+        const params = new URLSearchParams(window.location.search);
+        const preselectVehicleId = params.get('preselectVehicleId');
+        if (preselectVehicleId) {
+            // Keep the preselected vehicle and skip reloading
+            return;
+        }
+
+        setSelectedVehicleId('');
+        setVehicles([]);
         setVehiclesLoading(true);
         try {
             const full = await api.getCustomer(customer.id);
@@ -310,6 +318,31 @@ export default function NewLoan() {
 
     useEffect(() => {
         loadCustomers('');
+        
+        const params = new URLSearchParams(window.location.search);
+        
+        // Parse preselected vehicle ID if present in the URL query params
+        const preselectVehicleId = params.get('preselectVehicleId');
+        if (preselectVehicleId) {
+            api.getVehicles('limit=1000').then(res => {
+                const found = res.vehicles?.find(v => v.id === preselectVehicleId);
+                if (found) {
+                    setSelectedVehicleId(preselectVehicleId);
+                    setVehicles([found]);
+                }
+            }).catch(err => console.error('Failed to pre-select vehicle:', err));
+        }
+
+        // Parse buyer customer ID if present in the URL query params
+        const buyerCustomerId = params.get('buyerCustomerId');
+        if (buyerCustomerId) {
+            api.getCustomer(buyerCustomerId).then(c => {
+                if (c) {
+                    setSelectedCustomer(c);
+                    setCustomerQuery(c.name);
+                }
+            }).catch(err => console.error('Failed to pre-select customer:', err));
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 

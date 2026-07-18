@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const config = require('../config/env');
+const logger = require('./logger');
 
 const ALGORITHM = 'aes-256-cbc';
 const IV_LENGTH = 16;
@@ -22,7 +23,7 @@ function encrypt(text) {
         encrypted += cipher.final('hex');
         return iv.toString('hex') + ':' + encrypted;
     } catch (e) {
-        console.error('Encryption failed', e);
+        logger.error('Encryption failed', { error: e.message, stack: e.stack });
         return text;
     }
 }
@@ -39,7 +40,7 @@ function decrypt(text) {
         decrypted += decipher.final('utf8');
         return decrypted;
     } catch (e) {
-        console.error('Decryption failed', e);
+        logger.error('Decryption failed', { error: e.message, stack: e.stack });
         return text;
     }
 }

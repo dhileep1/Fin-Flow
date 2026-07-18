@@ -4,6 +4,8 @@ const { roundHalfUp } = require('../utils/rounding');
 const { logAudit } = require('./audit.service');
 const { v4: uuidv4 } = require('uuid');
 const receiptService = require('./receipt.service');
+const { validatePaymentDate } = require('../utils/dateUtils');
+const logger = require('../utils/logger');
 
 /**
  * Record a payment against a loan.
@@ -12,15 +14,7 @@ const receiptService = require('./receipt.service');
  */
 async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNumber, createdBy, paymentDate, idempotencyKey }) {
     if (paymentDate) {
-        const payDate = new Date(paymentDate);
-        const now = new Date();
-        if (payDate.getTime() > now.getTime() + 5 * 60 * 1000) {
-            throw new Error('Payment date cannot be in the future');
-        }
-        const maxPastAllowed = 3 * 24 * 60 * 60 * 1000;
-        if (now.getTime() - payDate.getTime() > maxPastAllowed) {
-            throw new Error('Payment date cannot be backdated by more than 3 days');
-        }
+        validatePaymentDate(paymentDate);
     }
 
     if (idempotencyKey) {
@@ -42,40 +36,46 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
     let remaining = Number(amount);
     const allocationDetails = [];
 
-    const result = await prisma.$transaction(async (tx) => {
-        if (idempotencyKey) {
-            const existing = await tx.payment.findFirst({
-                where: { orgId, idempotencyKey },
-                include: { receipts: true }
-            });
-            if (existing) {
-                return {
-                    payment: existing,
-                    receipt: existing.receipts[0],
-                    allocationDetails: existing.allocationDetails,
-                    creditBalance: 0,
-                    isDuplicate: true
-                };
+    let result;
+    try {
+        result = await prisma.$transaction(async (tx) => {
+            // BIZ-6: Pessimistic lock on organization row to prevent race conditions on receipt sequences
+            if (tx.$queryRawUnsafe) {
+                await tx.$queryRawUnsafe(
+                    'SELECT 1 FROM organizations WHERE id = $1::uuid FOR UPDATE',
+                    orgId
+                );
             }
-        }
 
-        // Get unpaid dues ordered by due_date ascending
-        const dues = await tx.loanDue.findMany({
-            where: { orgId, loanId, status: { not: 'paid' } },
-            orderBy: { dueDate: 'asc' },
-        });
+            // BIZ-2 / BIZ-10: Validate loan status is active
+            const loan = await tx.loan.findUnique({
+                where: { id: loanId }
+            });
+            if (!loan) throw new Error('Loan not found');
+            if (loan.status === 'closed') {
+                throw new Error('Cannot record payment against a closed loan');
+            }
+            if (loan.status === 'seized') {
+                throw new Error('Cannot record payment against a seized loan');
+            }
 
-        // 1. Overpayment validation: prevent payment exceeding total outstanding
-        const totalOutstanding = dues.reduce((sum, due) => {
-            const dueTotal = new Prisma.Decimal(due.totalDue);
-            const duePaid = new Prisma.Decimal(due.amountPaid);
-            return sum.plus(dueTotal.minus(duePaid));
-        }, new Prisma.Decimal(0));
+            // Get unpaid dues ordered by due_date ascending
+            const dues = await tx.loanDue.findMany({
+                where: { orgId, loanId, status: { not: 'paid' } },
+                orderBy: { dueDate: 'asc' },
+            });
 
-        const paymentAmount = new Prisma.Decimal(amount);
-        if (paymentAmount.greaterThan(totalOutstanding.plus(0.05))) {
-            throw new Error(`Payment amount ${amount} exceeds the total outstanding balance of ${totalOutstanding.toFixed(2)}`);
-        }
+            // 1. Overpayment validation: prevent payment exceeding total outstanding
+            const totalOutstanding = dues.reduce((sum, due) => {
+                const dueTotal = new Prisma.Decimal(due.totalDue);
+                const duePaid = new Prisma.Decimal(due.amountPaid);
+                return sum.plus(dueTotal.minus(duePaid));
+            }, new Prisma.Decimal(0));
+
+            const paymentAmount = new Prisma.Decimal(amount);
+            if (paymentAmount.greaterThan(totalOutstanding)) {
+                throw new Error(`Payment amount ${amount} exceeds the total outstanding balance of ${totalOutstanding.toFixed(2)}`);
+            }
 
         // Get organization and settings for dynamic allocation and receipt sequencing
         const org = await tx.organization.findUnique({
@@ -146,15 +146,16 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
                 allocation[lastComponent] = allocation[lastComponent].plus(leftover);
             }
 
-            // Update the due
             const newAmountPaid = duePaidSoFar.plus(paymentToApply);
             const isPaid = newAmountPaid.greaterThanOrEqualTo(dueTotal.minus(0.01));
+            const isOverdue = new Date(due.dueDate) < new Date();
+            const newStatus = isPaid ? 'paid' : (isOverdue ? 'overdue' : 'pending');
 
             await tx.loanDue.update({
                 where: { id: due.id },
                 data: {
                     amountPaid: newAmountPaid,
-                    status: isPaid ? 'paid' : 'pending',
+                    status: newStatus,
                 },
             });
 
@@ -174,8 +175,8 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
         const totalPrincipalPaid = allocationDetails.reduce((sum, a) => sum.plus(a.principal), new Prisma.Decimal(0));
 
         // Update loan outstanding
-        const loan = await tx.loan.findUnique({ where: { id: loanId } });
-        const newOutstanding = new Prisma.Decimal(loan.outstandingPrincipal).minus(totalPrincipalPaid);
+        const loanRecord = await tx.loan.findUnique({ where: { id: loanId } });
+        const newOutstanding = new Prisma.Decimal(loanRecord.outstandingPrincipal).minus(totalPrincipalPaid);
 
         // Check if loan should be closed
         const unpaidDues = await tx.loanDue.count({
@@ -207,10 +208,29 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
             },
         });
 
-        // Increment and update receipt sequence
-        const lastSeq = settings.lastReceiptSequence !== undefined ? Number(settings.lastReceiptSequence) : 0;
-        const nextSeq = lastSeq + 1;
-        
+        let nextSeq = (settings.lastReceiptSequence !== undefined ? Number(settings.lastReceiptSequence) : 0) + 1;
+        let receiptNumber;
+        let exists = true;
+        const shortOrgCode = org.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase().padEnd(3, 'X');
+
+        while (exists) {
+            const paddedSeq = String(nextSeq).padStart(6, '0');
+            receiptNumber = `RCP-${shortOrgCode}-${paddedSeq}`;
+
+            let existingReceipt = null;
+            if (tx.receipt.findFirst) {
+                existingReceipt = await tx.receipt.findFirst({
+                    where: { orgId, receiptNumber }
+                });
+            }
+            
+            if (!existingReceipt) {
+                exists = false;
+            } else {
+                nextSeq++;
+            }
+        }
+
         await tx.organization.update({
             where: { id: orgId },
             data: {
@@ -220,11 +240,6 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
                 }
             }
         });
-
-        // Generate sequential unique receipt number
-        const shortOrgCode = org.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase().padEnd(3, 'X');
-        const paddedSeq = String(nextSeq).padStart(6, '0');
-        const receiptNumber = `RCP-${shortOrgCode}-${paddedSeq}`;
 
         const receipt = await tx.receipt.create({
             data: {
@@ -237,6 +252,24 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
 
         return { payment, receipt, allocationDetails, creditBalance: remaining.toNumber(), customerId: loan.customerId };
     });
+    } catch (err) {
+        if (err.code === 'P2002' && idempotencyKey) {
+            const existing = await prisma.payment.findFirst({
+                where: { orgId, idempotencyKey },
+                include: { receipts: true }
+            });
+            if (existing) {
+                return {
+                    payment: existing,
+                    receipt: existing.receipts[0],
+                    allocationDetails: existing.allocationDetails,
+                    creditBalance: 0,
+                    isDuplicate: true
+                };
+            }
+        }
+        throw err;
+    }
 
     if (result.isDuplicate) {
         return result;
@@ -271,7 +304,7 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
         });
         result.receipt.whatsappSent = true; // enrich response
     } catch (err) {
-        console.error('[Receipt PDF / WhatsApp Notification Error]:', err.message);
+        logger.error('[Receipt PDF / WhatsApp Notification Error]', { message: err.message, stack: err.stack });
     }
 
     // Audit log
@@ -301,20 +334,27 @@ async function getPaymentsByLoan(orgId, loanId) {
 /**
  * Get all payments for an organization.
  */
-async function getAllPayments(orgId) {
-    return prisma.payment.findMany({
-        where: { orgId },
-        include: {
-            loan: {
-                include: {
-                    customer: { select: { name: true } },
+async function getAllPayments(orgId, { page = 1, limit = 25 } = {}) {
+    const skip = (page - 1) * limit;
+    const [payments, total] = await Promise.all([
+        prisma.payment.findMany({
+            where: { orgId },
+            skip,
+            take: limit,
+            include: {
+                loan: {
+                    include: {
+                        customer: { select: { name: true } },
+                    },
                 },
+                creator: { select: { name: true } },
+                receipts: { select: { receiptNumber: true } },
             },
-            creator: { select: { name: true } },
-            receipts: { select: { receiptNumber: true } },
-        },
-        orderBy: { paymentDate: 'desc' },
-    });
+            orderBy: { paymentDate: 'desc' },
+        }),
+        prisma.payment.count({ where: { orgId } })
+    ]);
+    return { payments, total, page, limit, totalPages: Math.ceil(total / limit) };
 }
 
 module.exports = { recordPayment, getPaymentsByLoan, getAllPayments };

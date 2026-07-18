@@ -345,6 +345,11 @@ model VehicleSeizure {
   valuationAmount Decimal? @map("valuation_amount") @db.Decimal(18, 2)
   status          String   @default("in_yard")
   notes           String?
+  settlementType  String?  @map("settlement_type")
+  settlementAmount Decimal? @map("settlement_amount") @db.Decimal(18, 2)
+  lossAmount      Decimal? @map("loss_amount") @db.Decimal(18, 2)
+  settledAt       DateTime? @map("settled_at")
+  settledBy       String?  @map("settled_by")
   createdAt       DateTime @default(now()) @map("created_at")
 
   org             Organization @relation(fields: [orgId], references: [id])

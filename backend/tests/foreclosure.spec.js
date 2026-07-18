@@ -125,8 +125,8 @@ describe('Loan Service - executeForeclosure', () => {
             where: { id: 'due-2' },
             data: {
                 principalDue: new Prisma.Decimal(5000),
-                interestDue: new Prisma.Decimal(50),
-                totalDue: new Prisma.Decimal(5050),
+                interestDue: new Prisma.Decimal(28.08),
+                totalDue: new Prisma.Decimal(5028.08),
                 amountPaid: new Prisma.Decimal(0),
                 status: 'upcoming'
             }
@@ -138,9 +138,9 @@ describe('Loan Service - executeForeclosure', () => {
             data: {
                 tenureMonths: 2,
                 monthlyInterestRate: 0.005,
-                monthlyInterestAmount: new Prisma.Decimal(50),
+                monthlyInterestAmount: new Prisma.Decimal(41.41),
                 monthlyPrincipalAmount: new Prisma.Decimal(5000),
-                monthlyDueAmount: new Prisma.Decimal(5050),
+                monthlyDueAmount: new Prisma.Decimal(5041.41),
                 outstandingPrincipal: new Prisma.Decimal(0),
                 status: 'closed'
             }

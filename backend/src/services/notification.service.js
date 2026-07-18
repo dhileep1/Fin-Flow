@@ -2,6 +2,7 @@ const prisma = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
 const twilio = require('twilio');
 const env = require('../config/env');
+const logger = require('../utils/logger');
 
 let twilioClient = null;
 if (env.twilioAccountSid && env.twilioAuthToken) {
@@ -15,6 +16,9 @@ if (env.twilioAccountSid && env.twilioAuthToken) {
 class WhatsAppProvider {
     async sendMessage(to, body, mediaUrl = null) {
         if (!twilioClient || env.whatsappProvider !== 'twilio') {
+            if (env.whatsappProvider === 'twilio' && !twilioClient) {
+                logger.warn('[WhatsApp] Twilio credentials missing, falling back to mock provider');
+            }
             console.log(`[WhatsApp Mock] Sending to ${to}: ${body}${mediaUrl ? ` [media: ${mediaUrl}]` : ''}`);
             return {
                 success: true,
@@ -43,7 +47,7 @@ class WhatsAppProvider {
                 providerMessageId: message.sid,
             };
         } catch (err) {
-            console.error('[Twilio Error] Failed to send message:', err.message);
+            logger.error('[Twilio Error] Failed to send message', { error: err.message, stack: err.stack });
             throw err;
         }
     }

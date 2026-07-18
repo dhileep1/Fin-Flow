@@ -4,6 +4,7 @@ const config = require('../config/env');
 const { runPenaltyJob } = require('./penaltyJob');
 const { runNotificationScheduler } = require('./notificationScheduler');
 const { runCallTaskRefresher } = require('./callTaskRefresher');
+const logger = require('../utils/logger');
 
 let connection = null;
 let jobsQueue = null;
@@ -14,7 +15,7 @@ let connectionErrorLogged = false;
 
 function initBullMQ() {
     try {
-        console.log('[BullMQ] Connecting to Redis at:', config.redisUrl);
+        logger.info('[BullMQ] Connecting to Redis at: ' + config.redisUrl);
         connection = new Redis(config.redisUrl, {
             maxRetriesPerRequest: null,
             enableReadyCheck: false,
@@ -23,19 +24,19 @@ function initBullMQ() {
 
         connection.on('error', (err) => {
             if (!connectionErrorLogged) {
-                console.warn('[BullMQ] Redis connection error, falling back to interval scheduler:', err.message);
+                logger.warn('[BullMQ] Redis connection error, falling back to interval scheduler: ' + err.message);
                 connectionErrorLogged = true;
             }
             startIntervalFallback();
         });
 
         connection.on('connect', async () => {
-            console.log('[BullMQ] Connected to Redis. Setting up queues and workers...');
+            logger.info('[BullMQ] Connected to Redis. Setting up queues and workers...');
             connectionErrorLogged = false;
             setupBullMQQueuesAndWorkers();
         });
     } catch (err) {
-        console.warn('[BullMQ] Failed to initialize Redis connection. Falling back to interval scheduler:', err.message);
+        logger.warn('[BullMQ] Failed to initialize Redis connection. Falling back to interval scheduler: ' + err.message);
         startIntervalFallback();
     }
 }
@@ -43,7 +44,11 @@ function initBullMQ() {
 async function setupBullMQQueuesAndWorkers() {
     try {
         // Clear any running fallback intervals
-        clearFallbackIntervals();
+        try {
+            clearFallbackIntervals();
+        } catch (e) {
+            logger.warn('Failed to clear fallback timers: ' + e.message);
+        }
 
         jobsQueue = new Queue('finflow-jobs', { connection });
 
@@ -63,10 +68,10 @@ async function setupBullMQQueuesAndWorkers() {
             repeat: { pattern: '*/5 * * * *' }
         });
 
-        console.log('[BullMQ] Repeatable jobs successfully registered in Redis');
+        logger.info('[BullMQ] Repeatable jobs successfully registered in Redis');
 
         worker = new Worker('finflow-jobs', async (job) => {
-            console.log(`[BullMQ Worker] Processing job: ${job.name}`);
+            logger.info(`[BullMQ Worker] Processing job: ${job.name}`);
             if (job.name === 'penalty-job') {
                 await runPenaltyJob();
             } else if (job.name === 'call-task-refresher') {
@@ -77,15 +82,15 @@ async function setupBullMQQueuesAndWorkers() {
         }, { connection });
 
         worker.on('failed', (job, err) => {
-            console.error(`[BullMQ Worker] Job ${job.name} failed:`, err.message);
+            logger.error(`[BullMQ Worker] Job ${job.name} failed`, { message: err.message, stack: err.stack });
         });
 
         worker.on('completed', (job) => {
-            console.log(`[BullMQ Worker] Job ${job.name} completed successfully`);
+            logger.info(`[BullMQ Worker] Job ${job.name} completed successfully`);
         });
 
     } catch (err) {
-        console.error('[BullMQ] Error setting up queues and workers, falling back:', err.message);
+        logger.error('[BullMQ] Error setting up queues and workers, falling back: ' + err.message);
         startIntervalFallback();
     }
 }
@@ -101,30 +106,50 @@ function clearFallbackIntervals() {
 function startIntervalFallback() {
     if (fallbackTimerIds.length > 0) return; // already running
 
-    console.log('[Workers Fallback] Starting simple setInterval scheduler...');
+    logger.info('[Workers Fallback] Starting simple setInterval scheduler...');
 
     // Run penalty job daily
-    fallbackTimerIds.push(setTimeout(() => {
-        runPenaltyJob().catch(console.error);
+    fallbackTimerIds.push(setTimeout(async () => {
+        try {
+            await runPenaltyJob();
+        } catch (err) {
+            logger.error('[Workers Fallback] Penalty job failed', { message: err.message, stack: err.stack });
+        }
     }, 5000));
-    fallbackTimerIds.push(setInterval(() => {
-        runPenaltyJob().catch(console.error);
+    fallbackTimerIds.push(setInterval(async () => {
+        try {
+            await runPenaltyJob();
+        } catch (err) {
+            logger.error('[Workers Fallback] Penalty job failed', { message: err.message, stack: err.stack });
+        }
     }, 24 * 60 * 60 * 1000));
 
     // Run call task refresher daily
-    fallbackTimerIds.push(setTimeout(() => {
-        runCallTaskRefresher().catch(console.error);
+    fallbackTimerIds.push(setTimeout(async () => {
+        try {
+            await runCallTaskRefresher();
+        } catch (err) {
+            logger.error('[Workers Fallback] Call task refresher failed', { message: err.message, stack: err.stack });
+        }
     }, 10000));
-    fallbackTimerIds.push(setInterval(() => {
-        runCallTaskRefresher().catch(console.error);
+    fallbackTimerIds.push(setInterval(async () => {
+        try {
+            await runCallTaskRefresher();
+        } catch (err) {
+            logger.error('[Workers Fallback] Call task refresher failed', { message: err.message, stack: err.stack });
+        }
     }, 24 * 60 * 60 * 1000));
 
     // Run notification scheduler every 5 minutes
-    fallbackTimerIds.push(setInterval(() => {
-        runNotificationScheduler().catch(console.error);
+    fallbackTimerIds.push(setInterval(async () => {
+        try {
+            await runNotificationScheduler();
+        } catch (err) {
+            logger.error('[Workers Fallback] Notification scheduler failed', { message: err.message, stack: err.stack });
+        }
     }, 5 * 60 * 1000));
 
-    console.log('[Workers Fallback] Simple scheduler initiated');
+    logger.info('[Workers Fallback] Simple scheduler initiated');
 }
 
 function startWorkers() {
@@ -132,7 +157,11 @@ function startWorkers() {
 }
 
 async function stopWorkers() {
-    clearFallbackIntervals();
+    try {
+        clearFallbackIntervals();
+    } catch (e) {
+        logger.warn('Failed to clear fallback timers: ' + e.message);
+    }
     if (worker) {
         await worker.close().catch(() => {});
         worker = null;

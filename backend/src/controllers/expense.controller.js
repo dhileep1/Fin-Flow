@@ -30,8 +30,10 @@ async function createExpense(req, res, next) {
 
 async function getExpenses(req, res, next) {
     try {
-        const expenses = await expenseService.getExpenses(req.orgId);
-        res.json(expenses);
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 25;
+        const result = await expenseService.getExpenses(req.orgId, { page, limit });
+        res.json(result);
     } catch (err) {
         next(err);
     }

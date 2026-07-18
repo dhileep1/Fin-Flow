@@ -13,8 +13,8 @@ async function login(req, res, next) {
         }
 
         const where = { orgId };
-        if (email) where.email = email;
-        else where.phone = phone;
+        if (email) where.email = email.trim().toLowerCase();
+        else where.phone = phone.trim();
 
         const user = await prisma.user.findFirst({ where });
         if (!user || !user.passwordHash) {

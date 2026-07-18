@@ -45,4 +45,8 @@ module.exports = {
   awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   awsRegion: process.env.AWS_REGION || 'us-east-1',
   s3BucketName: process.env.S3_BUCKET_NAME,
+
+  // Currency
+  currencySymbol: process.env.CURRENCY_SYMBOL || '₹',
+  currencyLocale: process.env.CURRENCY_LOCALE || 'en-IN',
 };

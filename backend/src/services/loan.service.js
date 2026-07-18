@@ -5,6 +5,22 @@ const { addMonths, formatDate } = require('../utils/dateUtils');
 const { logAudit } = require('./audit.service');
 const { v4: uuidv4 } = require('uuid');
 
+function getDuePaidBreakdown(due, allocationOrder) {
+    let currentPaid = new Prisma.Decimal(due.amountPaid || 0);
+    const paid = { penalty: new Prisma.Decimal(0), interest: new Prisma.Decimal(0), principal: new Prisma.Decimal(0) };
+    for (const component of allocationOrder) {
+        const limitValue = new Prisma.Decimal(due[component + 'Due'] || 0);
+        const allocated = Prisma.Decimal.min(currentPaid, limitValue);
+        paid[component] = allocated;
+        currentPaid = currentPaid.minus(allocated);
+    }
+    if (currentPaid.greaterThan(0) && allocationOrder.length > 0) {
+        const lastComponent = allocationOrder[allocationOrder.length - 1];
+        paid[lastComponent] = paid[lastComponent].plus(currentPaid);
+    }
+    return paid;
+}
+
 /**
  * Generate the loan due schedule for a given loan.
  * Implements the exact algorithm from the PRD:
@@ -99,6 +115,21 @@ async function createLoan({ orgId, customerId, vehicleId, assignedStaffId, princ
                 disbursedAmount,
                 status: 'active',
             },
+        });
+
+        // Update the Vehicle customerId and status to active (for new loan or financed resale)
+        await tx.vehicle.update({
+            where: { id: vehicleId, orgId },
+            data: { 
+                customerId,
+                status: 'active'
+            }
+        });
+
+        // Update any associated 'in_yard' seizure status to 'sold' (for financed resale)
+        await tx.vehicleSeizure.updateMany({
+            where: { vehicleId, orgId, status: 'in_yard' },
+            data: { status: 'sold' }
         });
 
         // Create loan dues
@@ -357,8 +388,26 @@ async function calculateForeclosureQuote(orgId, loanId, foreclosureRate) {
     const rNew = new Prisma.Decimal(foreclosureRate);
     const rOrig = new Prisma.Decimal(loan.monthlyInterestRate);
 
-    const monthlyInterestNew = new Prisma.Decimal(P.times(rNew).toFixed(2));
-    const totalInterestNew = new Prisma.Decimal(monthlyInterestNew.times(elapsedMonths).toFixed(2));
+    const org = prisma.organization ? await prisma.organization.findUnique({
+        where: { id: orgId }
+    }) : null;
+    const settings = org?.settings || {};
+    const allocationOrder = settings.allocationOrder || ['penalty', 'interest', 'principal'];
+
+    let outstandingPrincipal = P;
+    let totalInterestNew = new Prisma.Decimal(0);
+    const sortedDues = loan.loanDues.sort((a, b) => a.dueSequence - b.dueSequence);
+
+    for (let i = 1; i <= elapsedMonths; i++) {
+        const due = sortedDues.find(d => d.dueSequence === i);
+        if (!due) continue;
+
+        const interestNew_i = new Prisma.Decimal(outstandingPrincipal.times(rNew).toFixed(2));
+        totalInterestNew = totalInterestNew.plus(interestNew_i);
+
+        const paid = getDuePaidBreakdown(due, allocationOrder);
+        outstandingPrincipal = Prisma.Decimal.max(0, outstandingPrincipal.minus(paid.principal));
+    }
 
     const monthlyInterestOrig = new Prisma.Decimal(loan.monthlyInterestAmount);
     const totalInterestOrig = new Prisma.Decimal(monthlyInterestOrig.times(elapsedMonths).toFixed(2));
@@ -415,6 +464,22 @@ async function executeForeclosure(orgId, loanId, { foreclosureRate, paymentMetho
     const amount = new Prisma.Decimal(quote.foreclosureAmount);
 
     return prisma.$transaction(async (tx) => {
+        // BIZ-6: Pessimistic lock on organization row to prevent race conditions on receipt sequences
+        let org;
+        if (tx.$queryRawUnsafe) {
+            const orgs = await tx.$queryRawUnsafe(
+                'SELECT * FROM organizations WHERE id = $1::uuid FOR UPDATE',
+                orgId
+            );
+            org = orgs[0];
+        } else if (tx.organization) {
+            org = await tx.organization.findUnique({
+                where: { id: orgId }
+            });
+        }
+        const settings = org?.settings || {};
+        const allocationOrder = settings.allocationOrder || ['penalty', 'interest', 'principal'];
+
         // 1. Delete future dues
         await tx.loanDue.deleteMany({
             where: {
@@ -432,10 +497,10 @@ async function executeForeclosure(orgId, loanId, { foreclosureRate, paymentMetho
         const P = new Prisma.Decimal(quote.principal);
         const monthlyPrincipal = new Prisma.Decimal(P.div(quote.elapsedMonths).toFixed(2));
         const rNew = new Prisma.Decimal(foreclosureRate);
-        const monthlyInterestNew = new Prisma.Decimal(P.times(rNew).toFixed(2));
 
         // Re-allocate existing totalPaid across the adjusted dues sequence
         let remainingPaid = new Prisma.Decimal(quote.totalPaid);
+        let outstandingPrincipal = P;
         for (const due of dues) {
             let principalDue;
             if (due.dueSequence < quote.elapsedMonths) {
@@ -443,13 +508,17 @@ async function executeForeclosure(orgId, loanId, { foreclosureRate, paymentMetho
             } else {
                 principalDue = P.minus(monthlyPrincipal.times(quote.elapsedMonths - 1));
             }
-            const interestDue = monthlyInterestNew;
+            const interestDue = new Prisma.Decimal(outstandingPrincipal.times(rNew).toFixed(2));
             const penaltyDue = new Prisma.Decimal(due.penaltyDue);
             const totalDue = principalDue.plus(interestDue).plus(penaltyDue);
 
             const allocated = Prisma.Decimal.min(remainingPaid, totalDue);
             const amountPaid = allocated;
-            const status = amountPaid.greaterThanOrEqualTo(totalDue.minus(0.01)) ? 'paid' : (amountPaid.greaterThan(0) ? 'pending' : 'upcoming');
+            
+            // BIZ-11: Set correct status (paid, overdue, or pending/upcoming)
+            const isPaid = amountPaid.greaterThanOrEqualTo(totalDue.minus(0.01));
+            const isOverdue = new Date(due.dueDate) < new Date();
+            const status = isPaid ? 'paid' : (isOverdue ? 'overdue' : (amountPaid.greaterThan(0) ? 'pending' : 'upcoming'));
 
             await tx.loanDue.update({
                 where: { id: due.id },
@@ -461,6 +530,15 @@ async function executeForeclosure(orgId, loanId, { foreclosureRate, paymentMetho
                     status
                 }
             });
+
+            // Calculate paid components for this due to update declining balance
+            const paid = getDuePaidBreakdown({
+                penaltyDue,
+                interestDue,
+                principalDue,
+                amountPaid
+            }, allocationOrder);
+            outstandingPrincipal = Prisma.Decimal.max(0, outstandingPrincipal.minus(paid.principal));
 
             remainingPaid = remainingPaid.minus(allocated);
         }
@@ -613,6 +691,8 @@ async function executeForeclosure(orgId, loanId, { foreclosureRate, paymentMetho
                 data: { status: 'paid' }
             });
         }
+
+        const monthlyInterestNew = new Prisma.Decimal((quote.newInterestAccrued / quote.elapsedMonths).toFixed(2));
 
         // 4. Close the loan
         const loan = await tx.loan.update({

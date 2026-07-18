@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
-import { Search, Bike, MapPin, ChevronLeft, ChevronRight, Activity, Warehouse, CheckCircle, ShieldAlert, BadgeAlert, ArrowUpRight } from 'lucide-react';
+import { Search, Bike, MapPin, ChevronLeft, ChevronRight, Activity, Warehouse, CheckCircle, ShieldAlert, BadgeAlert, ArrowUpRight, User, Phone, DollarSign, Calendar, X, AlertTriangle } from 'lucide-react';
+import SeizureModal from '../components/SeizureModal';
 
 const formatCurrency = (amount) =>
     `₹${Number(amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -16,6 +17,7 @@ export default function VehicleInventory() {
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
     const [page, setPage] = useState(1);
+    const [showSeizureModal, setShowSeizureModal] = useState(false);
     const navigate = useNavigate();
 
     // Valuation update states
@@ -25,6 +27,21 @@ export default function VehicleInventory() {
     const [confirmUpdate, setConfirmUpdate] = useState(false);
     const [updatingValuation, setUpdatingValuation] = useState(false);
     const [valuationError, setValuationError] = useState('');
+
+    // Detailed action card and settlement modal states
+    const [selectedVehicle, setSelectedVehicle] = useState(null);
+    const [showActionModal, setShowActionModal] = useState(false);
+    const [showResaleModal, setShowResaleModal] = useState(false);
+    const [settlementType, setSettlementType] = useState('redemption'); // 'redemption', 'cash_sale', 'financed_sale'
+    const [buyerName, setBuyerName] = useState('');
+    const [buyerPhone, setBuyerPhone] = useState('');
+    const [buyerAddress, setBuyerAddress] = useState('');
+    const [settlementAmount, setSettlementAmount] = useState('');
+    const [paymentMethod, setPaymentMethod] = useState('cash');
+    const [loanDetails, setLoanDetails] = useState(null);
+    const [outstandingBalance, setOutstandingBalance] = useState(0);
+    const [submittingSettlement, setSubmittingSettlement] = useState(false);
+    const [settlementError, setSettlementError] = useState('');
 
     useEffect(() => {
         loadVehicles();
@@ -39,6 +56,21 @@ export default function VehicleInventory() {
             console.error('Failed to load vehicles:', err);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchLoanDetails = async (loanId) => {
+        try {
+            setOutstandingBalance(0);
+            setSettlementAmount('');
+            const data = await api.getLoan(loanId);
+            setLoanDetails(data);
+            const unpaid = data.loanDues?.filter(d => d.status !== 'paid') || [];
+            const total = unpaid.reduce((sum, d) => sum + Number(d.totalDue) - Number(d.amountPaid), 0);
+            setOutstandingBalance(total);
+            setSettlementAmount(total.toString());
+        } catch (err) {
+            console.error('Failed to load loan details for settlement', err);
         }
     };
 
@@ -206,6 +238,17 @@ export default function VehicleInventory() {
 
             {/* Segmented Filter Control & Search Bar */}
             <div className="flex items-center justify-between gap-4" style={{ background: '#fff', padding: '10px 16px', borderRadius: '12px', border: '1px solid var(--slate-200)', boxShadow: 'var(--shadow-xs)' }}>
+                <div className="search-bar" style={{ width: '100%', maxWidth: '240px', margin: 0 }}>
+                    <input
+                        type="text"
+                        placeholder="Search model, plate..."
+                        value={search}
+                        onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                        style={{ paddingLeft: '2.2rem', borderRadius: '20px', fontSize: '12.5px', height: '36px' }}
+                    />
+                    <Search size={13} className="search-icon" style={{ left: '0.8rem' }} />
+                </div>
+
                 <div style={{ display: 'inline-flex', background: '#f1f5f9', padding: '3px', borderRadius: '20px', border: '1px solid #e2e8f0' }}>
                     <button 
                         className={`sleek-pill-btn ${statusFilter === '' ? 'active' : ''}`}
@@ -231,17 +274,6 @@ export default function VehicleInventory() {
                     >
                         Sold
                     </button>
-                </div>
-
-                <div className="search-bar" style={{ width: '100%', maxWidth: '240px', margin: 0 }}>
-                    <input
-                        type="text"
-                        placeholder="Search model, plate..."
-                        value={search}
-                        onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                        style={{ paddingLeft: '2.2rem', borderRadius: '20px', fontSize: '12.5px', height: '36px' }}
-                    />
-                    <Search size={13} className="search-icon" style={{ left: '0.8rem' }} />
                 </div>
             </div>
 
@@ -286,11 +318,8 @@ export default function VehicleInventory() {
                                         key={v.id} 
                                         className="cursor-pointer hover-table-row"
                                         onClick={() => {
-                                            if (latestSeizure.loanId) {
-                                                navigate(`/loans/${latestSeizure.loanId}`);
-                                            } else if (latestLoan.id) {
-                                                navigate(`/loans/${latestLoan.id}`);
-                                            }
+                                            setSelectedVehicle(v);
+                                            setShowActionModal(true);
                                         }}
                                         style={{ transition: 'background-color 0.15s ease' }}
                                     >
@@ -534,6 +563,498 @@ export default function VehicleInventory() {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Vehicle Action Card Modal */}
+            {showActionModal && selectedVehicle && (
+                <div 
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: 'rgba(15, 23, 42, 0.6)',
+                        backdropFilter: 'blur(4px)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 999,
+                        animation: 'fadeIn 0.2s ease-out'
+                    }}
+                    onClick={() => setShowActionModal(false)}
+                >
+                    <div 
+                        style={{
+                            background: '#ffffff',
+                            width: '100%',
+                            maxWidth: '480px',
+                            borderRadius: '16px',
+                            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                            padding: '24px',
+                            position: 'relative'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <button 
+                            onClick={() => setShowActionModal(false)}
+                            style={{ position: 'absolute', top: '16px', right: '16px', border: 'none', background: 'none', cursor: 'pointer', color: '#64748b' }}
+                        >
+                            <X size={20} />
+                        </button>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                            <div style={{ background: '#f1f5f9', color: '#475569', padding: '10px', borderRadius: '10px' }}>
+                                <Bike size={24} />
+                            </div>
+                            <div>
+                                <h3 style={{ fontWeight: 800, fontSize: '18px', color: '#1e293b', margin: 0 }}>{selectedVehicle.vehicleNumber}</h3>
+                                <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>{selectedVehicle.model || 'Unknown Model'}</p>
+                            </div>
+                            <div style={{ marginLeft: 'auto' }}>
+                                {getStatusBadge(selectedVehicle.status)}
+                            </div>
+                        </div>
+
+                        <div style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: '16px', marginBottom: '16px' }}>
+                            <h4 style={{ fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>Owner Details</h4>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#334155' }}>
+                                    <User size={14} className="text-slate-400" />
+                                    <span style={{ fontWeight: 600 }}>{selectedVehicle.customer?.name || '—'}</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#334155' }}>
+                                    <Phone size={14} className="text-slate-400" />
+                                    <span>{selectedVehicle.customer?.phone || '—'}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Seizure & Valuation details */}
+                        {(selectedVehicle.status === 'seized' || selectedVehicle.status === 'sold') && (
+                            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
+                                <h4 style={{ fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>Seizure Log Details</h4>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '12.5px' }}>
+                                    <div>
+                                        <span style={{ display: 'block', color: '#64748b', fontSize: '10px', textTransform: 'uppercase', fontWeight: 600 }}>Seized Date</span>
+                                        <span style={{ fontWeight: 600, color: '#1e293b' }}>{formatDate(selectedVehicle.seizures?.[0]?.seizureDate)}</span>
+                                    </div>
+                                    <div>
+                                        <span style={{ display: 'block', color: '#64748b', fontSize: '10px', textTransform: 'uppercase', fontWeight: 600 }}>Current Valuation</span>
+                                        <span style={{ fontWeight: 700, color: '#0f766e' }}>
+                                            {selectedVehicle.seizures?.[0]?.valuationAmount ? formatCurrency(selectedVehicle.seizures[0].valuationAmount) : 'Pending Valuation'}
+                                        </span>
+                                    </div>
+                                    <div style={{ gridColumn: 'span 2' }}>
+                                        <span style={{ display: 'block', color: '#64748b', fontSize: '10px', textTransform: 'uppercase', fontWeight: 600 }}>Yard Location</span>
+                                        <span style={{ fontWeight: 600, color: '#1e293b' }}>{selectedVehicle.seizures?.[0]?.yardLocation || 'Not Specified'}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {selectedVehicle.status === 'seized' && (
+                                <>
+                                    <button 
+                                        type="button"
+                                        className="btn btn-primary"
+                                        style={{ width: '100%', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                                        onClick={() => {
+                                            const loanId = selectedVehicle.seizures?.[0]?.loanId || selectedVehicle.loans?.[0]?.id;
+                                            if (loanId) {
+                                                fetchLoanDetails(loanId);
+                                            }
+                                            setShowActionModal(false);
+                                            setBuyerName('');
+                                            setBuyerPhone('');
+                                            setBuyerAddress('');
+                                            setSettlementType('redemption');
+                                            setSettlementError('');
+                                            setShowResaleModal(true);
+                                        }}
+                                    >
+                                        <DollarSign size={16} />
+                                        Settle & Resell
+                                    </button>
+
+                                    <button 
+                                        type="button"
+                                        className="btn btn-secondary"
+                                        style={{ width: '100%', borderRadius: '10px' }}
+                                        onClick={() => {
+                                            setSelectedSeizure(selectedVehicle.seizures?.[0]);
+                                            setNewValuation(selectedVehicle.seizures?.[0]?.valuationAmount || '');
+                                            setShowValuationModal(true);
+                                        }}
+                                    >
+                                        Update Valuation Amount
+                                    </button>
+                                </>
+                            )}
+
+                            {selectedVehicle.status === 'active' && (selectedVehicle.loans?.[0]?.id || selectedVehicle.seizures?.[0]?.loanId) && (
+                                <button 
+                                    type="button"
+                                    className="btn btn-primary"
+                                    style={{ width: '100%', borderRadius: '10px', backgroundColor: '#ef4444', borderColor: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                                    onClick={() => {
+                                        setShowActionModal(false);
+                                        setShowSeizureModal(true);
+                                    }}
+                                >
+                                    <AlertTriangle size={16} />
+                                    Seize Vehicle
+                                </button>
+                            )}
+
+                            {(selectedVehicle.seizures?.[0]?.loanId || selectedVehicle.loans?.[0]?.id) && (
+                                <button 
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    style={{ width: '100%', borderRadius: '10px' }}
+                                    onClick={() => {
+                                        const loanId = selectedVehicle.seizures?.[0]?.loanId || selectedVehicle.loans?.[0]?.id;
+                                        navigate(`/loans/${loanId}`);
+                                    }}
+                                >
+                                    Open Loan Details
+                                </button>
+                            )}
+
+                            <button 
+                                type="button"
+                                className="btn btn-secondary"
+                                style={{ width: '100%', borderRadius: '10px', background: '#f1f5f9', border: 'none', color: '#475569' }}
+                                onClick={() => setShowActionModal(false)}
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Settlement & Resell Wizard Modal */}
+            {showResaleModal && selectedVehicle && (
+                <div 
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: 'rgba(15, 23, 42, 0.6)',
+                        backdropFilter: 'blur(4px)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 999,
+                        animation: 'fadeIn 0.2s ease-out'
+                    }}
+                    onClick={() => {
+                        if (!submittingSettlement) {
+                            setShowResaleModal(false);
+                        }
+                    }}
+                >
+                    <div 
+                        style={{
+                            background: '#ffffff',
+                            width: '100%',
+                            maxWidth: '480px',
+                            borderRadius: '16px',
+                            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                            padding: '24px',
+                            position: 'relative'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <button 
+                            onClick={() => setShowResaleModal(false)}
+                            style={{ position: 'absolute', top: '16px', right: '16px', border: 'none', background: 'none', cursor: 'pointer', color: '#64748b' }}
+                            disabled={submittingSettlement}
+                        >
+                            <X size={20} />
+                        </button>
+
+                        <h3 style={{ fontWeight: 800, fontSize: '18px', color: '#1e293b', marginBottom: '4px' }}>Asset Settlement & Resale</h3>
+                        <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
+                            Configure resolution for vehicle: <strong>{selectedVehicle.vehicleNumber}</strong>
+                        </p>
+
+                        {/* Tabs: Owner Redemption vs Sell to New Buyer */}
+                        <div style={{ display: 'flex', background: '#f1f5f9', padding: '3px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
+                            <button
+                                type="button"
+                                style={{
+                                    flex: 1,
+                                    padding: '8px',
+                                    fontSize: '13px',
+                                    fontWeight: 600,
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    background: settlementType === 'redemption' ? '#ffffff' : 'transparent',
+                                    color: settlementType === 'redemption' ? 'var(--color-primary)' : 'var(--slate-500)',
+                                    boxShadow: settlementType === 'redemption' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s'
+                                }}
+                                onClick={() => setSettlementType('redemption')}
+                            >
+                                Owner Redemption
+                            </button>
+                            <button
+                                type="button"
+                                style={{
+                                    flex: 1,
+                                    padding: '8px',
+                                    fontSize: '13px',
+                                    fontWeight: 600,
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    background: (settlementType === 'cash_sale' || settlementType === 'financed_sale') ? '#ffffff' : 'transparent',
+                                    color: (settlementType === 'cash_sale' || settlementType === 'financed_sale') ? 'var(--color-primary)' : 'var(--slate-500)',
+                                    boxShadow: (settlementType === 'cash_sale' || settlementType === 'financed_sale') ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s'
+                                }}
+                                onClick={() => setSettlementType('cash_sale')}
+                            >
+                                Sell to New Buyer
+                            </button>
+                        </div>
+
+                        {settlementError && (
+                            <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.1)', color: 'rgb(239, 68, 68)', borderRadius: '8px', fontSize: '13px', marginBottom: '16px', fontWeight: 500 }}>
+                                {settlementError}
+                            </div>
+                        )}
+
+                        <div style={{ background: '#f8fafc', padding: '12px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '16px', fontSize: '13px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                <span style={{ color: '#64748b' }}>Original Customer:</span>
+                                <span style={{ fontWeight: 600, color: '#334155' }}>{selectedVehicle.customer?.name}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span style={{ color: '#64748b' }}>Total Dues Outstanding:</span>
+                                <span style={{ fontWeight: 700, color: '#e11d48' }}>{formatCurrency(outstandingBalance)}</span>
+                            </div>
+                        </div>
+
+                        {settlementType !== 'redemption' && (
+                            <div style={{ borderTop: '1px dashed #e2e8f0', paddingTop: '12px', marginBottom: '12px' }}>
+                                <div style={{ display: 'flex', background: '#f1f5f9', padding: '2px', borderRadius: '8px', marginBottom: '12px', border: '1px solid #e2e8f0' }}>
+                                    <button
+                                        type="button"
+                                        style={{
+                                            flex: 1,
+                                            padding: '6px',
+                                            fontSize: '12px',
+                                            fontWeight: 600,
+                                            border: 'none',
+                                            borderRadius: '6px',
+                                            background: settlementType === 'cash_sale' ? '#ffffff' : 'transparent',
+                                            color: settlementType === 'cash_sale' ? 'var(--color-primary)' : 'var(--slate-500)',
+                                            cursor: 'pointer'
+                                        }}
+                                        onClick={() => setSettlementType('cash_sale')}
+                                    >
+                                        Cash Sale
+                                    </button>
+                                    <button
+                                        type="button"
+                                        style={{
+                                            flex: 1,
+                                            padding: '6px',
+                                            fontSize: '12px',
+                                            fontWeight: 600,
+                                            border: 'none',
+                                            borderRadius: '6px',
+                                            background: settlementType === 'financed_sale' ? '#ffffff' : 'transparent',
+                                            color: settlementType === 'financed_sale' ? 'var(--color-primary)' : 'var(--slate-500)',
+                                            cursor: 'pointer'
+                                        }}
+                                        onClick={() => setSettlementType('financed_sale')}
+                                    >
+                                        Financed Sale
+                                    </button>
+                                </div>
+
+                                <div className="form-group" style={{ marginBottom: '10px' }}>
+                                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Buyer Name</label>
+                                    <input 
+                                        type="text" 
+                                        className="form-input"
+                                        placeholder="Enter buyer's name"
+                                        value={buyerName}
+                                        onChange={(e) => setBuyerName(e.target.value)}
+                                        style={{ borderRadius: '8px', width: '100%', padding: '6px 12px' }}
+                                    />
+                                </div>
+                                <div className="form-group" style={{ marginBottom: '10px' }}>
+                                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Buyer Phone</label>
+                                    <input 
+                                        type="text" 
+                                        className="form-input"
+                                        placeholder="Enter buyer's phone"
+                                        value={buyerPhone}
+                                        onChange={(e) => setBuyerPhone(e.target.value)}
+                                        style={{ borderRadius: '8px', width: '100%', padding: '6px 12px' }}
+                                    />
+                                </div>
+                                <div className="form-group" style={{ marginBottom: '10px' }}>
+                                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Buyer Address</label>
+                                    <input 
+                                        type="text" 
+                                        className="form-input"
+                                        placeholder="Enter buyer's address (optional)"
+                                        value={buyerAddress}
+                                        onChange={(e) => setBuyerAddress(e.target.value)}
+                                        style={{ borderRadius: '8px', width: '100%', padding: '6px 12px' }}
+                                    />
+                                </div>
+                            </div>
+                        )}
+
+                        {settlementType !== 'financed_sale' ? (
+                            <div>
+                                <div className="form-group" style={{ marginBottom: '12px' }}>
+                                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Settlement / Sale Price (₹)</label>
+                                    <input 
+                                        type="number" 
+                                        className="form-input"
+                                        placeholder="Enter settlement amount"
+                                        value={settlementAmount}
+                                        onChange={(e) => setSettlementAmount(e.target.value)}
+                                        style={{ borderRadius: '8px', width: '100%', padding: '8px 12px' }}
+                                    />
+                                </div>
+
+                                {settlementType === 'cash_sale' && (
+                                    <div className="form-group" style={{ marginBottom: '12px' }}>
+                                        <label className="form-label" style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Payment Method</label>
+                                        <select
+                                            className="form-select text-slate-800"
+                                            value={paymentMethod}
+                                            onChange={(e) => setPaymentMethod(e.target.value)}
+                                            style={{ borderRadius: '8px', width: '100%', padding: '6px 12px', border: '1px solid var(--color-border)', outline: 'none' }}
+                                        >
+                                            <option value="cash">Cash</option>
+                                            <option value="upi">UPI / Online</option>
+                                            <option value="bank">Bank Transfer</option>
+                                            <option value="cheque">Cheque</option>
+                                        </select>
+                                    </div>
+                                )}
+
+                                <div style={{ background: '#fff1f2', padding: '10px 14px', borderRadius: '8px', fontSize: '12px', color: '#991b1b', marginBottom: '20px', border: '1px solid #fecaca', display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
+                                    <span>Calculated Loss (Write-off):</span>
+                                    <span>{formatCurrency(Math.max(0, outstandingBalance - Number(settlementAmount || 0)))}</span>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '12px' }}>
+                                    <button 
+                                        type="button"
+                                        className="btn btn-secondary"
+                                        onClick={() => setShowResaleModal(false)}
+                                        disabled={submittingSettlement}
+                                        style={{ flex: 1, borderRadius: '10px' }}
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button 
+                                        type="button"
+                                        className="btn btn-primary"
+                                        disabled={submittingSettlement || (settlementType === 'cash_sale' && !buyerName)}
+                                        onClick={async () => {
+                                            setSubmittingSettlement(true);
+                                            setSettlementError('');
+                                            try {
+                                                await api.settleSeizure(selectedVehicle.seizures[0].id, {
+                                                    settlementType,
+                                                    settlementAmount: Number(settlementAmount),
+                                                    buyerName,
+                                                    buyerPhone,
+                                                    buyerAddress,
+                                                    paymentMethod
+                                                });
+                                                setShowResaleModal(false);
+                                                loadVehicles(); // Refresh
+                                            } catch (err) {
+                                                setSettlementError(err.message || 'Failed to submit settlement');
+                                            } finally {
+                                                setSubmittingSettlement(false);
+                                            }
+                                        }}
+                                        style={{ flex: 1, borderRadius: '10px' }}
+                                    >
+                                        {submittingSettlement ? 'Saving...' : settlementType === 'redemption' ? 'Confirm Redemption' : 'Confirm Cash Sale'}
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                                <div style={{ background: '#f0fdf4', color: '#15803d', padding: '12px', borderRadius: '8px', fontSize: '12.5px', lineHeight: '1.5', marginBottom: '20px', textAlign: 'left', border: '1px solid #bbf7d0' }}>
+                                    This will settle and close the old customer's loan (calculating the loss write-off), transfer vehicle ownership to the new buyer, and redirect you to the <strong>New Loan Wizard</strong> with this vehicle pre-selected.
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '12px' }}>
+                                    <button 
+                                        type="button"
+                                        className="btn btn-secondary"
+                                        onClick={() => setShowResaleModal(false)}
+                                        disabled={submittingSettlement}
+                                        style={{ flex: 1, borderRadius: '10px' }}
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="btn btn-primary"
+                                        disabled={submittingSettlement || !buyerName}
+                                        style={{ flex: 1, borderRadius: '10px' }}
+                                        onClick={async () => {
+                                            setSubmittingSettlement(true);
+                                            setSettlementError('');
+                                            try {
+                                                const res = await api.settleSeizure(selectedVehicle.seizures[0].id, {
+                                                    settlementType: 'financed_sale',
+                                                    settlementAmount: 0, // Dues transfered to new financed loan
+                                                    buyerName,
+                                                    buyerPhone,
+                                                    buyerAddress
+                                                });
+                                                setShowResaleModal(false);
+                                                loadVehicles(); // Refresh
+                                                navigate(`/loans/new?preselectVehicleId=${selectedVehicle.id}&buyerCustomerId=${res.buyerCustomer?.id}`);
+                                            } catch (err) {
+                                                setSettlementError(err.message || 'Failed to settle and redirect');
+                                            } finally {
+                                                setSubmittingSettlement(false);
+                                            }
+                                        }}
+                                    >
+                                        {submittingSettlement ? 'Processing...' : 'Settle & Setup Finance'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+            {showSeizureModal && selectedVehicle && (
+                <SeizureModal 
+                    loanId={selectedVehicle.loans?.[0]?.id || selectedVehicle.seizures?.[0]?.loanId}
+                    vehicleId={selectedVehicle.id}
+                    customerName={selectedVehicle.customer?.name}
+                    vehicleNumber={selectedVehicle.vehicleNumber}
+                    onClose={() => setShowSeizureModal(false)}
+                    onSuccess={() => {
+                        setShowSeizureModal(false);
+                        loadVehicles();
+                    }}
+                />
             )}
         </div>
     );

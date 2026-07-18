@@ -1,35 +1,49 @@
 const prisma = require('../config/database');
+const logger = require('../utils/logger');
 
 /**
  * Call task refresher — runs daily at 00:10.
  * Marks call tasks with next_call_date <= today as available.
  */
 async function runCallTaskRefresher() {
-    console.log('[CallTaskRefresher] Refreshing call tasks...');
+    logger.info('[CallTaskRefresher] Refreshing call tasks...');
+    try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+        // 1. Mark dues with dueDate < today and not paid as 'overdue'
+        const overdueUpdate = await prisma.loanDue.updateMany({
+            where: {
+                status: { in: ['upcoming', 'pending'] },
+                dueDate: { lt: today }
+            },
+            data: { status: 'overdue' }
+        });
 
-    // Update dues status: mark as pending if due_date <= today and not paid
-    const dueStatusUpdate = await prisma.loanDue.updateMany({
-        where: {
-            status: 'upcoming',
-            dueDate: { lte: today },
-        },
-        data: { status: 'pending' },
-    });
+        // 2. Mark dues with dueDate === today and status === 'upcoming' as 'pending'
+        const pendingUpdate = await prisma.loanDue.updateMany({
+            where: {
+                status: 'upcoming',
+                dueDate: today
+            },
+            data: { status: 'pending' }
+        });
 
-    console.log(`[CallTaskRefresher] Updated ${dueStatusUpdate.count} dues to pending`);
+        logger.info(`[CallTaskRefresher] Updated ${overdueUpdate.count} dues to overdue, ${pendingUpdate.count} dues to pending`);
 
-    // Count tasks ready for follow-up
-    const readyTasks = await prisma.callTask.count({
-        where: {
-            nextCallDate: { lte: today },
-        },
-    });
+        // Count tasks ready for follow-up
+        const readyTasks = await prisma.callTask.count({
+            where: {
+                nextCallDate: { lte: today },
+            },
+        });
 
-    console.log(`[CallTaskRefresher] ${readyTasks} call tasks ready for follow-up`);
-    return { duesUpdated: dueStatusUpdate.count, readyTasks };
+        logger.info(`[CallTaskRefresher] ${readyTasks} call tasks ready for follow-up`);
+        return { duesUpdated: overdueUpdate.count + pendingUpdate.count, readyTasks };
+    } catch (err) {
+        logger.error('[CallTaskRefresher] Failed', { error: err.message, stack: err.stack });
+        throw err;
+    }
 }
 
 module.exports = { runCallTaskRefresher };

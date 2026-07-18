@@ -45,4 +45,26 @@ function addDays(date, days) {
     return d;
 }
 
-module.exports = { addMonths, formatDate, daysBetween, addDays };
+/**
+ * Validate payment date (cannot be in the future, cannot be backdated by more than 3 days).
+ * Throws an error if invalid.
+ */
+function validatePaymentDate(paymentDate) {
+    if (!paymentDate) return;
+    const payDate = new Date(paymentDate);
+    if (isNaN(payDate.getTime())) {
+        throw new Error('Invalid date format');
+    }
+    const now = new Date();
+    // Allow 5 minutes buffer for clock skew
+    if (payDate.getTime() > now.getTime() + 5 * 60 * 1000) {
+        throw new Error('Payment date cannot be in the future');
+    }
+    const maxPastAllowed = 3 * 24 * 60 * 60 * 1000;
+    if (now.getTime() - payDate.getTime() > maxPastAllowed) {
+        throw new Error('Payment date cannot be backdated by more than 3 days');
+    }
+}
+
+module.exports = { addMonths, formatDate, daysBetween, addDays, validatePaymentDate };
+

@@ -52,8 +52,53 @@ async function updateSeizureValuation(req, res, next) {
     }
 }
 
+async function resellVehicle(req, res, next) {
+    try {
+        const { id } = req.params;
+        const { salePrice, buyerName, buyerPhone, paymentMethod } = req.body;
+        
+        const seizure = await seizureService.resellVehicle({
+            orgId: req.orgId,
+            seizureId: id,
+            salePrice,
+            buyerName,
+            buyerPhone,
+            paymentMethod,
+            userId: req.user.id
+        });
+
+        res.json(seizure);
+    } catch (err) {
+        next(err);
+    }
+}
+
+async function settleSeizure(req, res, next) {
+    try {
+        const { id } = req.params;
+        const { settlementType, settlementAmount, buyerName, buyerPhone, buyerAddress } = req.body;
+        
+        const result = await seizureService.settleSeizure({
+            orgId: req.orgId,
+            seizureId: id,
+            settlementType,
+            settlementAmount,
+            buyerName,
+            buyerPhone,
+            buyerAddress,
+            userId: req.user.id
+        });
+
+        res.json(result);
+    } catch (err) {
+        next(err);
+    }
+}
+
 module.exports = {
     seizeVehicle,
     getSeizedInventory,
-    updateSeizureValuation
+    updateSeizureValuation,
+    resellVehicle,
+    settleSeizure
 };

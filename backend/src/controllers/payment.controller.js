@@ -39,8 +39,10 @@ async function getPayments(req, res, next) {
             const payments = await paymentService.getPaymentsByLoan(req.orgId, loanId);
             return res.json(payments);
         } else {
-            const payments = await paymentService.getAllPayments(req.orgId);
-            return res.json(payments);
+            const page = parseInt(req.query.page) || 1;
+            const limit = parseInt(req.query.limit) || 25;
+            const result = await paymentService.getAllPayments(req.orgId, { page, limit });
+            return res.json(result);
         }
     } catch (err) {
         next(err);

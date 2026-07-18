@@ -33,7 +33,7 @@ export default function Collections() {
     const [loading, setLoading] = useState(true);
     
     // Tab and filter states
-    const [activeTab, setActiveTab] = useState('all'); // 'all' | 'payments' | 'docCharges' | 'loans' | 'expenses'
+    const [activeTab, setActiveTab] = useState('all'); // 'all' | 'payments' | 'loans' | 'expenses'
     const [dateFilter, setDateFilter] = useState('month'); // 'today' | 'week' | 'month' | 'year' | 'custom'
     const [aggregationLevel, setAggregationLevel] = useState('day'); // 'day' | 'week' | 'month' | 'year'
     const [customFrom, setCustomFrom] = useState('');
@@ -47,7 +47,6 @@ export default function Collections() {
     // Pagination states
     const [allPage, setAllPage] = useState(1);
     const [paymentPage, setPaymentPage] = useState(1);
-    const [loanPage, setLoanPage] = useState(1);
     const [loansGivenPage, setLoansGivenPage] = useState(1);
     const [expensePage, setExpensePage] = useState(1);
 
@@ -63,9 +62,9 @@ export default function Collections() {
     const fetchAllData = async () => {
         try {
             const [paymentsData, loansData, expensesData, orgData] = await Promise.all([
-                api.getPayments(),
+                api.getPayments(undefined, 'limit=10000'),
                 api.getLoans('limit=1000'),
-                api.getExpenses(),
+                api.getExpenses('limit=10000'),
                 api.getOrgSettings()
             ]);
             setPayments(paymentsData || []);
@@ -213,6 +212,70 @@ export default function Collections() {
             return category.includes(q) || desc.includes(q) || creatorName.includes(q) || matchesTag;
         });
     }, [dateFilteredExpenses, searchQuery]);
+
+    // Combined flat list of all transactions sorted by date
+    const flatTransactionsList = useMemo(() => {
+        const list = [];
+        filteredPayments.forEach(p => {
+            list.push({
+                id: `p-${p.id}`,
+                date: p.paymentDate,
+                time: p.paymentDate ? new Date(p.paymentDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—',
+                type: 'Payment',
+                typeClass: 'border-emerald-500 text-emerald-700 bg-emerald-50',
+                title: `EMI Bill #${p.receipts?.[0]?.receiptNumber || '—'}`,
+                details: `Loan Reference: #${p.loanId?.slice(0, 8).toUpperCase()}`,
+                customer: p.loan?.customer?.name || '—',
+                inflow: Number(p.amount),
+                outflow: 0,
+                creator: p.creator?.name || 'System'
+            });
+        });
+        filteredLoans.forEach(l => {
+            list.push({
+                id: `l-doc-${l.id}`,
+                date: l.startDate,
+                time: l.startDate ? new Date(l.startDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—',
+                type: 'Doc Fee',
+                typeClass: 'border-blue-500 text-blue-700 bg-blue-50',
+                title: `Loan Reference: #${l.id?.slice(0, 8).toUpperCase()}`,
+                details: 'Processing & documentation charges',
+                customer: l.customer?.name || '—',
+                inflow: Number(l.documentFee),
+                outflow: 0,
+                creator: l.assignedStaff?.name || 'Admin'
+            });
+            list.push({
+                id: `l-principal-${l.id}`,
+                date: l.startDate,
+                time: l.startDate ? new Date(l.startDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—',
+                type: 'Disbursal',
+                typeClass: 'border-amber-500 text-amber-700 bg-amber-50',
+                title: `Loan Reference: #${l.id?.slice(0, 8).toUpperCase()}`,
+                details: 'Principal disbursed amount',
+                customer: l.customer?.name || '—',
+                inflow: 0,
+                outflow: Number(l.principalAmount),
+                creator: l.assignedStaff?.name || 'Admin'
+            });
+        });
+        filteredExpenses.forEach(e => {
+            list.push({
+                id: `e-${e.id}`,
+                date: e.expenseDate,
+                time: e.expenseDate ? new Date(e.expenseDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—',
+                type: 'Expense',
+                typeClass: 'border-red-500 text-red-700 bg-red-50',
+                title: e.category ? e.category.toUpperCase() : 'GENERAL',
+                details: e.description || 'No description provided',
+                customer: '—',
+                inflow: 0,
+                outflow: Number(e.amount),
+                creator: e.creator?.name || 'System'
+            });
+        });
+        return list.sort((a, b) => new Date(b.date) - new Date(a.date));
+    }, [filteredPayments, filteredLoans, filteredExpenses]);
 
     // Helpers to parse date values locally
     const getLocalDateString = (dateVal) => {
@@ -431,12 +494,6 @@ export default function Collections() {
         return filteredPayments.slice(start, start + PAGE_SIZE);
     }, [filteredPayments, paymentPage]);
 
-    // Paginate filtered loans
-    const pagedLoans = useMemo(() => {
-        const start = (loanPage - 1) * PAGE_SIZE;
-        return filteredLoans.slice(start, start + PAGE_SIZE);
-    }, [filteredLoans, loanPage]);
-
     // Paginate filtered loans given
     const pagedLoansGiven = useMemo(() => {
         const start = (loansGivenPage - 1) * PAGE_SIZE;
@@ -449,18 +506,11 @@ export default function Collections() {
         return filteredExpenses.slice(start, start + PAGE_SIZE);
     }, [filteredExpenses, expensePage]);
 
-    const totalAllPages = Math.max(1, Math.ceil(filteredDateGroups.length / PAGE_SIZE));
-    const totalPaymentPages = Math.max(1, Math.ceil(filteredPayments.length / PAGE_SIZE));
-    const totalLoanPages = Math.max(1, Math.ceil(filteredLoans.length / PAGE_SIZE));
-    const totalLoansGivenPages = Math.max(1, Math.ceil(filteredLoans.length / PAGE_SIZE));
-    const totalExpensePages = Math.max(1, Math.ceil(filteredExpenses.length / PAGE_SIZE));
-
     // Filter date groups so we only display periods with relevant data for specific tabs
     const tabGroups = useMemo(() => {
         return allDateGroups.filter(g => {
             if (activeTab === 'all') return true;
             if (activeTab === 'payments') return g.payments.length > 0;
-            if (activeTab === 'docCharges') return g.loans.some(l => Number(l.documentFee) > 0);
             if (activeTab === 'loans') return g.loans.length > 0;
             if (activeTab === 'expenses') return g.expenses.length > 0;
             return false;
@@ -472,36 +522,45 @@ export default function Collections() {
         let page = 1;
         if (activeTab === 'all') page = allPage;
         else if (activeTab === 'payments') page = paymentPage;
-        else if (activeTab === 'docCharges') page = loanPage;
         else if (activeTab === 'loans') page = loansGivenPage;
         else if (activeTab === 'expenses') page = expensePage;
 
         const start = (page - 1) * PAGE_SIZE;
         return tabGroups.slice(start, start + PAGE_SIZE);
-    }, [tabGroups, activeTab, allPage, paymentPage, loanPage, loansGivenPage, expensePage]);
+    }, [tabGroups, activeTab, allPage, paymentPage, loansGivenPage, expensePage]);
 
-    const totalTabGroupPages = Math.max(1, Math.ceil(tabGroups.length / PAGE_SIZE));
+    const totalCount = useMemo(() => {
+        if (aggregationLevel === 'none') {
+            if (activeTab === 'all') return flatTransactionsList.length;
+            if (activeTab === 'payments') return filteredPayments.length;
+            if (activeTab === 'loans') return filteredLoans.length;
+            if (activeTab === 'expenses') return filteredExpenses.length;
+        }
+        if (activeTab === 'all') return filteredDateGroups.length;
+        return tabGroups.length;
+    }, [aggregationLevel, activeTab, flatTransactionsList, filteredPayments, filteredLoans, filteredExpenses, filteredDateGroups, tabGroups]);
+
+    const totalPages = useMemo(() => {
+        return Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+    }, [totalCount]);
 
     const startIdx = useMemo(() => {
         let page = 1;
         if (activeTab === 'all') page = allPage;
         else if (activeTab === 'payments') page = paymentPage;
-        else if (activeTab === 'docCharges') page = loanPage;
         else if (activeTab === 'loans') page = loansGivenPage;
         else if (activeTab === 'expenses') page = expensePage;
         return (page - 1) * PAGE_SIZE + 1;
-    }, [activeTab, allPage, paymentPage, loanPage, loansGivenPage, expensePage]);
+    }, [activeTab, allPage, paymentPage, loansGivenPage, expensePage]);
 
     const endIdx = useMemo(() => {
         let page = 1;
-        let totalCount = 0;
-        if (activeTab === 'all') { page = allPage; totalCount = filteredDateGroups.length; }
-        else if (activeTab === 'payments') { page = paymentPage; totalCount = tabGroups.length; }
-        else if (activeTab === 'docCharges') { page = loanPage; totalCount = tabGroups.length; }
-        else if (activeTab === 'loans') { page = loansGivenPage; totalCount = tabGroups.length; }
-        else if (activeTab === 'expenses') { page = expensePage; totalCount = tabGroups.length; }
+        if (activeTab === 'all') page = allPage;
+        else if (activeTab === 'payments') page = paymentPage;
+        else if (activeTab === 'loans') page = loansGivenPage;
+        else if (activeTab === 'expenses') page = expensePage;
         return Math.min(page * PAGE_SIZE, totalCount);
-    }, [activeTab, allPage, paymentPage, loanPage, loansGivenPage, expensePage, filteredDateGroups, tabGroups]);
+    }, [activeTab, allPage, paymentPage, loansGivenPage, expensePage, totalCount]);
 
     // Sub-table and formatting helpers for grouped expansion views
     const renderGroupLabel = (key) => {
@@ -519,8 +578,8 @@ export default function Collections() {
         return formatDate(key);
     };
 
-    const renderPaymentsSubTable = (list) => (
-        <div className="border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm" style={{ margin: '4px 0 12px 0' }}>
+    const renderPaymentsSubTable = (list, isFlat = false) => (
+        <div className={isFlat ? "table-container p-0 border-0 shadow-none" : "border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm"} style={isFlat ? {} : { margin: '4px 0 12px 0' }}>
             <table className="w-full text-xs">
                 <thead>
                     <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
@@ -560,8 +619,8 @@ export default function Collections() {
         </div>
     );
 
-    const renderDocChargesSubTable = (list) => (
-        <div className="border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm" style={{ margin: '4px 0 12px 0' }}>
+    const renderLoansGivenSubTable = (list, isFlat = false) => (
+        <div className={isFlat ? "table-container p-0 border-0 shadow-none" : "border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm"} style={isFlat ? {} : { margin: '4px 0 12px 0' }}>
             <table className="w-full text-xs">
                 <thead>
                     <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
@@ -593,39 +652,8 @@ export default function Collections() {
         </div>
     );
 
-    const renderLoansGivenSubTable = (list) => (
-        <div className="border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm" style={{ margin: '4px 0 12px 0' }}>
-            <table className="w-full text-xs">
-                <thead>
-                    <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
-                        <th className="px-4 py-2.5 text-left">Date Disbursed</th>
-                        <th className="px-4 py-2.5 text-left">Loan No</th>
-                        <th className="px-4 py-2.5 text-left">Customer</th>
-                        <th className="px-4 py-2.5 text-center">Principal Amount</th>
-                        <th className="px-4 py-2.5 text-center">Disbursed By</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                    {list.map(l => (
-                        <tr key={l.id} className="hover:bg-slate-50/50">
-                            <td className="px-4 py-3 text-slate-500 font-medium">{formatDate(l.startDate)}</td>
-                            <td className="px-4 py-3"><span className="text-slate-900 font-semibold">{l.id?.slice(0, 8).toUpperCase()}</span></td>
-                            <td className="px-4 py-3 text-slate-900 font-semibold">{l.customer?.name || '—'}</td>
-                            <td className="px-4 py-3 text-center text-slate-900 font-bold">{fmtShort(Number(l.principalAmount))}</td>
-                            <td className="px-4 py-3 text-center">
-                                <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold">
-                                    {l.assignedStaff?.name || 'Admin'}
-                                </span>
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-        </div>
-    );
-
-    const renderExpensesSubTable = (list) => (
-        <div className="border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm" style={{ margin: '4px 0 12px 0' }}>
+    const renderExpensesSubTable = (list, isFlat = false) => (
+        <div className={isFlat ? "table-container p-0 border-0 shadow-none" : "border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm"} style={isFlat ? {} : { margin: '4px 0 12px 0' }}>
             <table className="w-full text-xs">
                 <thead>
                     <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
@@ -705,6 +733,109 @@ export default function Collections() {
         return { totalPrincipal, totalInterest, totalAmount, totalDocCharges, totalLoanAmount, totalExpenseAmt, totalRentAmt, totalSalaryAmt };
     }, [filteredPayments, filteredLoans, filteredExpenses]);
 
+    const renderFlatTable = () => {
+        if (activeTab === 'all') {
+            const txs = flatTransactionsList;
+            const pagedFlatTxs = txs.slice((allPage - 1) * PAGE_SIZE, allPage * PAGE_SIZE);
+            return (
+                <div className="table-container p-0 border-t border-slate-200 shadow-none">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="border-b border-slate-200 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                                <th className="px-4 py-4 text-left">Date</th>
+                                <th className="px-4 py-4 text-left">Time</th>
+                                <th className="px-4 py-4 text-left">Particulars / Details</th>
+                                <th className="px-4 py-4 text-left">Customer</th>
+                                <th className="px-4 py-4 text-right">Inflow (+)</th>
+                                <th className="px-4 py-4 text-right">Outflow (-)</th>
+                                <th className="px-4 py-4 text-center">Recorded By</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {pagedFlatTxs.length === 0 ? (
+                                <tr>
+                                    <td colSpan={7} className="text-center py-8 text-slate-400">
+                                        <div className="empty-state-inline" style={{ padding: 'var(--space-8) 0' }}>
+                                            <div className="empty-icon" style={{ display: 'inline-flex', padding: '12px', background: 'var(--slate-100)', borderRadius: '50%', color: 'var(--slate-400)', marginBottom: '12px' }}>
+                                                <Landmark size={24} />
+                                            </div>
+                                            <div className="empty-title" style={{ fontWeight: 600, color: 'var(--slate-800)', fontSize: '15px' }}>No transactions found</div>
+                                            <div className="empty-desc" style={{ color: 'var(--slate-500)', fontSize: '13px' }}>
+                                                No transactions recorded for the selected criteria.
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ) : (
+                                pagedFlatTxs.map(dtx => (
+                                    <tr key={dtx.id} className="hover:bg-slate-50/50">
+                                        <td className="px-4 py-4 text-slate-500 font-medium">{formatDate(dtx.date)}</td>
+                                        <td className="px-4 py-4 text-slate-400 font-medium text-xs">{dtx.time}</td>
+                                        <td className="px-4 py-4 text-slate-700">
+                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                <span style={{ fontWeight: 600, color: 'var(--slate-900)' }}>{dtx.title}</span>
+                                                <span className="text-[11px] text-slate-400 font-medium">{dtx.details}</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-4 text-slate-900 font-semibold">{dtx.customer}</td>
+                                        <td className="px-4 py-4 text-right">
+                                            {dtx.inflow > 0 ? (
+                                                <span className="text-emerald-500 font-extrabold">{fmt(dtx.inflow)}</span>
+                                            ) : (
+                                                <span className="text-slate-300 font-mono">—</span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-4 text-right">
+                                            {dtx.outflow > 0 ? (
+                                                <span className="text-red-400 font-extrabold">{fmt(dtx.outflow)}</span>
+                                            ) : (
+                                                <span className="text-slate-300 font-mono">—</span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-4 text-center">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold">
+                                                {dtx.creator}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            );
+        }
+        
+        if (activeTab === 'payments') {
+            const list = filteredPayments.slice((paymentPage - 1) * PAGE_SIZE, paymentPage * PAGE_SIZE);
+            return (
+                <div className="border-t border-slate-200">
+                    {renderPaymentsSubTable(list, true)}
+                </div>
+            );
+        }
+        
+        if (activeTab === 'loans') {
+            const list = filteredLoans.slice((loansGivenPage - 1) * PAGE_SIZE, loansGivenPage * PAGE_SIZE);
+            return (
+                <div className="border-t border-slate-200">
+                    {renderLoansGivenSubTable(list, true)}
+                </div>
+            );
+        }
+        
+        if (activeTab === 'expenses') {
+            const list = filteredExpenses.slice((expensePage - 1) * PAGE_SIZE, expensePage * PAGE_SIZE);
+            return (
+                <div className="border-t border-slate-200">
+                    {renderExpensesSubTable(list, true)}
+                </div>
+            );
+        }
+        
+        return null;
+    };
+
     if (loading) {
         return (
             <div className="animate-fade-in">
@@ -765,16 +896,6 @@ export default function Collections() {
                     </button>
                     <button
                         role="tab"
-                        aria-selected={activeTab === 'docCharges'}
-                        className={`cmd-tab ${activeTab === 'docCharges' ? 'cmd-tab--active' : ''}`}
-                        onClick={() => setActiveTab('docCharges')}
-                        style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-                    >
-                        <Receipt size={16} />
-                        Document Charges
-                    </button>
-                    <button
-                        role="tab"
                         aria-selected={activeTab === 'loans'}
                         className={`cmd-tab ${activeTab === 'loans' ? 'cmd-tab--active' : ''}`}
                         onClick={() => setActiveTab('loans')}
@@ -795,43 +916,8 @@ export default function Collections() {
                     </button>
                 </div>
 
-                {activeTab === 'loans' && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                        <div style={{ 
-                            background: '#fef2f2', 
-                            border: '1px solid #fee2e2', 
-                            padding: '6px 14px', 
-                            borderRadius: '10px', 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            gap: '8px',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                            color: 'rgb(239, 68, 68)'
-                        }}>
-                            <span style={{ color: '#ef4444', textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.5px' }}>Total Loans Given:</span>
-                            <span>{fmt(totals.totalLoanAmount)}</span>
-                        </div>
-                    </div>
-                )}
-
                 {activeTab === 'expenses' && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                        <div style={{ 
-                            background: '#fef2f2', 
-                            border: '1px solid #fee2e2', 
-                            padding: '6px 14px', 
-                            borderRadius: '10px', 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            gap: '8px',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                            color: 'rgb(239, 68, 68)'
-                        }}>
-                            <span style={{ color: '#ef4444', textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.5px' }}>Total Expenses:</span>
-                            <span>{fmt(totals.totalExpenseAmt)}</span>
-                        </div>
                         <button
                             className="btn btn-primary"
                             onClick={() => setShowExpenseModal(true)}
@@ -885,7 +971,7 @@ export default function Collections() {
                                 placeholder={
                                     activeTab === 'payments' 
                                         ? "Search bill no, loan no, customer..." 
-                                        : activeTab === 'docCharges' 
+                                        : activeTab === 'loans'
                                             ? "Search loan no, customer..."
                                             : "Search category, tags, desc..."
                                 }
@@ -903,7 +989,7 @@ export default function Collections() {
                                     setSearchQuery(e.target.value);
                                     setAllPage(1);
                                     setPaymentPage(1);
-                                    setLoanPage(1);
+                                    setLoansGivenPage(1);
                                 }}
                             />
                         </div>
@@ -925,14 +1011,16 @@ export default function Collections() {
                                         onClick={() => {
                                             setDateFilter(b.key);
                                             if (b.key === 'today' || b.key === 'week') {
-                                                setAggregationLevel('day');
+                                                if (aggregationLevel !== 'none') {
+                                                    setAggregationLevel('day');
+                                                }
                                             } else if (b.key === 'month' && aggregationLevel === 'year') {
                                                 setAggregationLevel('month');
                                             }
                                             setExpandedDates({});
                                             setAllPage(1);
                                             setPaymentPage(1);
-                                            setLoanPage(1);
+                                            setLoansGivenPage(1);
                                             setExpensePage(1);
                                         }}
                                         style={{
@@ -962,7 +1050,7 @@ export default function Collections() {
                                         setExpandedDates({});
                                         setAllPage(1);
                                         setPaymentPage(1);
-                                        setLoanPage(1);
+                                        setLoansGivenPage(1);
                                         setExpensePage(1);
                                     } : undefined}
                                     style={{
@@ -1022,7 +1110,7 @@ export default function Collections() {
                                                         setCustomFrom(e.target.value);
                                                         setAllPage(1);
                                                         setPaymentPage(1);
-                                                        setLoanPage(1);
+                                                        setLoansGivenPage(1);
                                                         setExpensePage(1);
                                                     }}
                                                     onClick={(e) => {
@@ -1052,7 +1140,7 @@ export default function Collections() {
                                                         setCustomTo(e.target.value);
                                                         setAllPage(1);
                                                         setPaymentPage(1);
-                                                        setLoanPage(1);
+                                                        setLoansGivenPage(1);
                                                         setExpensePage(1);
                                                     }}
                                                     onClick={(e) => {
@@ -1081,7 +1169,7 @@ export default function Collections() {
                                                 setExpandedDates({});
                                                 setAllPage(1);
                                                 setPaymentPage(1);
-                                                setLoanPage(1);
+                                                setLoansGivenPage(1);
                                                 setExpensePage(1);
                                             }}
                                             style={{
@@ -1108,7 +1196,7 @@ export default function Collections() {
                         </div>
                     </div>
                 </div>
-            </div>            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px', marginBottom: '12px' }}>
+            </div>            <div style={{ display: 'grid', gridTemplateColumns: activeTab === 'all' ? 'repeat(5, 1fr)' : 'repeat(3, 1fr)', gap: '16px', marginBottom: '12px' }}>
                 {activeTab === 'all' ? (
                     <>
                         {/* Collections & Doc Charges (Green Group) */}
@@ -1270,17 +1358,17 @@ export default function Collections() {
                             </div>
                         </div>
                     </>
-                ) : activeTab === 'docCharges' ? (
+                ) : activeTab === 'loans' ? (
                     <>
                         <div className="progress-card">
-                            <div className="progress-card__icon-circle progress-card__icon-circle--emerald">
-                                <Receipt size={24} />
+                            <div className="progress-card__icon-circle progress-card__icon-circle--slate">
+                                <Hash size={24} />
                             </div>
                             <div className="progress-card__body">
-                                <span className="progress-card__title">Document Charges Collected</span>
+                                <span className="progress-card__title">Total Loans</span>
                                 <div className="progress-card__values">
-                                    <span className="progress-card__actual" style={{ color: 'var(--color-success)' }}>
-                                        {fmt(totals.totalDocCharges)}
+                                    <span className="progress-card__actual" style={{ color: 'var(--slate-700)' }}>
+                                        {filteredLoans.length} {filteredLoans.length === 1 ? 'Loan' : 'Loans'}
                                     </span>
                                 </div>
                             </div>
@@ -1291,7 +1379,7 @@ export default function Collections() {
                                 <Landmark size={24} />
                             </div>
                             <div className="progress-card__body">
-                                <span className="progress-card__title">Total Loans Issued</span>
+                                <span className="progress-card__title">Total Amount Disbursed</span>
                                 <div className="progress-card__values">
                                     <span className="progress-card__actual" style={{ color: 'var(--slate-900)' }}>
                                         {fmt(totals.totalLoanAmount)}
@@ -1301,14 +1389,14 @@ export default function Collections() {
                         </div>
 
                         <div className="progress-card">
-                            <div className="progress-card__icon-circle progress-card__icon-circle--slate">
-                                <Hash size={24} />
+                            <div className="progress-card__icon-circle progress-card__icon-circle--emerald">
+                                <Receipt size={24} />
                             </div>
                             <div className="progress-card__body">
-                                <span className="progress-card__title">Total Loans Count</span>
+                                <span className="progress-card__title">Document Charges Collected</span>
                                 <div className="progress-card__values">
-                                    <span className="progress-card__actual" style={{ color: 'var(--slate-700)' }}>
-                                        {filteredLoans.length} Loans
+                                    <span className="progress-card__actual" style={{ color: 'var(--color-success)' }}>
+                                        {fmt(totals.totalDocCharges)}
                                     </span>
                                 </div>
                             </div>
@@ -1369,6 +1457,7 @@ export default function Collections() {
                         <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Group:</span>
                         <div style={{ display: 'flex', gap: '4px' }}>
                             {[
+                                { key: 'none', label: 'None', allowedFor: ['all', 'today', 'week', 'month', 'year', 'custom'] },
                                 { key: 'day', label: 'Day', allowedFor: ['all', 'today', 'week', 'month', 'year', 'custom'] },
                                 { key: 'week', label: 'Week', allowedFor: ['all', 'week', 'month', 'year', 'custom'] },
                                 { key: 'month', label: 'Month', allowedFor: ['all', 'month', 'year', 'custom'] },
@@ -1385,7 +1474,6 @@ export default function Collections() {
                                             setExpandedDates({});
                                             setAllPage(1);
                                             setPaymentPage(1);
-                                            setLoanPage(1);
                                             setLoansGivenPage(1);
                                             setExpensePage(1);
                                         }}
@@ -1411,7 +1499,9 @@ export default function Collections() {
                     </div>
                 </div>
 
-                {activeTab === 'all' ? (
+                {aggregationLevel === 'none' ? (
+                    renderFlatTable()
+                ) : activeTab === 'all' ? (
                     <div className="table-container p-0 border-0 shadow-none">
                         <table className="w-full text-sm">
                             <thead>
@@ -1592,7 +1682,6 @@ export default function Collections() {
                                                         <thead>
                                                             <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
                                                                 <th className="px-4 py-2.5 text-left">Time</th>
-                                                                <th className="px-4 py-2.5 text-left">Type</th>
                                                                 <th className="px-4 py-2.5 text-left">Particulars / Details</th>
                                                                 <th className="px-4 py-2.5 text-left">Customer</th>
                                                                 <th className="px-4 py-2.5 text-right">Inflow (+)</th>
@@ -1604,11 +1693,6 @@ export default function Collections() {
                                                             {txs.map(dtx => (
                                                                 <tr key={dtx.id} className="hover:bg-slate-50/50">
                                                                     <td className="px-4 py-3 text-slate-500 font-medium">{dtx.time}</td>
-                                                                    <td className="px-4 py-3">
-                                                                        <span className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase border ${dtx.typeClass}`}>
-                                                                            {dtx.type}
-                                                                        </span>
-                                                                    </td>
                                                                     <td className="px-4 py-3 text-slate-700">
                                                                         <div style={{ display: 'flex', flexDirection: 'column' }}>
                                                                             <span style={{ fontWeight: 600, color: 'var(--slate-900)' }}>{dtx.title}</span>
@@ -1742,10 +1826,6 @@ export default function Collections() {
                                         if (activeTab === 'payments') {
                                             count = g.payments.length;
                                             total = g.collection;
-                                        } else if (activeTab === 'docCharges') {
-                                            const docChargeLoans = g.loans.filter(l => Number(l.documentFee) > 0);
-                                            count = docChargeLoans.length;
-                                            total = g.docCharges;
                                         } else if (activeTab === 'loans') {
                                             count = g.loans.length;
                                             total = g.given;
@@ -1779,7 +1859,7 @@ export default function Collections() {
                                                     </td>
                                                     <td className="px-6 py-4 text-left text-slate-900 font-semibold">{renderGroupLabel(g.date)}</td>
                                                     <td className="px-6 py-4 text-center text-slate-500 font-medium">{count} {count === 1 ? 'entry' : 'entries'}</td>
-                                                    <td className="px-6 py-4 text-right text-slate-900 font-bold" style={{ color: (activeTab === 'payments' || activeTab === 'docCharges') ? 'var(--color-success)' : '#ef4444' }}>
+                                                    <td className="px-6 py-4 text-right text-slate-900 font-bold" style={{ color: activeTab === 'payments' ? 'var(--color-success)' : '#ef4444' }}>
                                                         {fmt(total)}
                                                     </td>
                                                 </tr>
@@ -1787,7 +1867,6 @@ export default function Collections() {
                                                     <tr className="bg-slate-50/30">
                                                         <td colSpan={4} className="px-6 py-4">
                                                             {activeTab === 'payments' && renderPaymentsSubTable(g.payments)}
-                                                            {activeTab === 'docCharges' && renderDocChargesSubTable(g.loans.filter(l => Number(l.documentFee) > 0))}
                                                             {activeTab === 'loans' && renderLoansGivenSubTable(g.loans)}
                                                             {activeTab === 'expenses' && renderExpensesSubTable(g.expenses)}
                                                         </td>
@@ -1806,18 +1885,15 @@ export default function Collections() {
                     let page = 1;
                     let setPage = () => {};
                     let totalPages = 1;
-                    if (activeTab === 'all') { page = allPage; setPage = setAllPage; totalPages = totalAllPages; }
-                    else if (activeTab === 'payments') { page = paymentPage; setPage = setPaymentPage; totalPages = totalTabGroupPages; }
-                    else if (activeTab === 'docCharges') { page = loanPage; setPage = setLoanPage; totalPages = totalTabGroupPages; }
-                    else if (activeTab === 'loans') { page = loansGivenPage; setPage = setLoansGivenPage; totalPages = totalTabGroupPages; }
-                    else if (activeTab === 'expenses') { page = expensePage; setPage = setExpensePage; totalPages = totalTabGroupPages; }
+                    if (activeTab === 'all') { page = allPage; setPage = setAllPage; }
+                    else if (activeTab === 'payments') { page = paymentPage; setPage = setPaymentPage; }
+                    else if (activeTab === 'loans') { page = loansGivenPage; setPage = setLoansGivenPage; }
+                    else if (activeTab === 'expenses') { page = expensePage; setPage = setExpensePage; }
 
-                    const currentGroupsLength = activeTab === 'all' ? filteredDateGroups.length : tabGroups.length;
-
-                    return currentGroupsLength > 0 && (
+                    return totalCount > 0 && (
                         <div className="table-pagination" style={{ padding: 'var(--space-4) var(--space-6)', borderTop: '1px solid var(--slate-100)' }}>
                             <div className="pagination-info text-sm text-slate-500 font-medium">
-                                Showing {startIdx} to {endIdx} of {currentGroupsLength} entries
+                                Showing {startIdx} to {endIdx} of {totalCount} entries
                             </div>
                             <div className="pagination-btns flex gap-1">
                                 <button

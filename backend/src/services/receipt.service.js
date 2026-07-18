@@ -3,6 +3,7 @@ const prisma = require('../config/database');
 const { roundHalfUp } = require('../utils/rounding');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const env = require('../config/env');
+const logger = require('../utils/logger');
 
 let s3Client = null;
 if (env.awsAccessKeyId && env.awsSecretAccessKey) {
@@ -13,6 +14,11 @@ if (env.awsAccessKeyId && env.awsSecretAccessKey) {
             secretAccessKey: env.awsSecretAccessKey
         }
     });
+}
+
+function formatCurrency(amount) {
+    const symbol = env.currencySymbol || '₹';
+    return `${symbol}${roundHalfUp(amount).toFixed(2)}`;
 }
 
 async function uploadReceiptToS3(receiptId, pdfBuffer) {
@@ -31,7 +37,7 @@ async function uploadReceiptToS3(receiptId, pdfBuffer) {
         }));
         return `https://${env.s3BucketName}.s3.${env.awsRegion}.amazonaws.com/${key}`;
     } catch (err) {
-        console.error(`[S3 Error] Upload failed for receipt ${receiptId}:`, err.message);
+        logger.error(`[S3 Error] Upload failed for receipt ${receiptId}`, { error: err.message, stack: err.stack });
         throw err;
     }
 }
@@ -142,10 +148,10 @@ async function generateReceiptPDF(paymentId) {
         for (const item of alloc) {
             const y = doc.y;
             doc.text(`#${item.dueSequence || '-'}`, 50, y, { width: 50 });
-            doc.text(`₹${roundHalfUp(item.principal).toFixed(2)}`, 110, y, { width: 100, align: 'right' });
-            doc.text(`₹${roundHalfUp(item.interest).toFixed(2)}`, 220, y, { width: 100, align: 'right' });
-            doc.text(`₹${roundHalfUp(item.penalty).toFixed(2)}`, 330, y, { width: 100, align: 'right' });
-            doc.text(`₹${roundHalfUp(item.total).toFixed(2)}`, 440, y, { width: 100, align: 'right' });
+            doc.text(formatCurrency(item.principal), 110, y, { width: 100, align: 'right' });
+            doc.text(formatCurrency(item.interest), 220, y, { width: 100, align: 'right' });
+            doc.text(formatCurrency(item.penalty), 330, y, { width: 100, align: 'right' });
+            doc.text(formatCurrency(item.total), 440, y, { width: 100, align: 'right' });
             doc.moveDown(0.3);
             totalPrincipal += item.principal;
             totalInterest += item.interest;
@@ -158,16 +164,16 @@ async function generateReceiptPDF(paymentId) {
         doc.font('Helvetica-Bold').fontSize(10);
         const totY = doc.y;
         doc.text('TOTAL', 50, totY, { width: 50 });
-        doc.text(`₹${roundHalfUp(totalPrincipal).toFixed(2)}`, 110, totY, { width: 100, align: 'right' });
-        doc.text(`₹${roundHalfUp(totalInterest).toFixed(2)}`, 220, totY, { width: 100, align: 'right' });
-        doc.text(`₹${roundHalfUp(totalPenalty).toFixed(2)}`, 330, totY, { width: 100, align: 'right' });
-        doc.text(`₹${Number(payment.amount).toFixed(2)}`, 440, totY, { width: 100, align: 'right' });
+        doc.text(formatCurrency(totalPrincipal), 110, totY, { width: 100, align: 'right' });
+        doc.text(formatCurrency(totalInterest), 220, totY, { width: 100, align: 'right' });
+        doc.text(formatCurrency(totalPenalty), 330, totY, { width: 100, align: 'right' });
+        doc.text(formatCurrency(payment.amount), 440, totY, { width: 100, align: 'right' });
         doc.moveDown(1.5);
 
         // Outstanding
         doc.fontSize(11).font('Helvetica-Bold');
-        doc.text(`Amount Paid: ₹${Number(payment.amount).toFixed(2)}`);
-        doc.text(`Outstanding Principal: ₹${Number(payment.loan.outstandingPrincipal).toFixed(2)}`);
+        doc.text(`Amount Paid: ${formatCurrency(payment.amount)}`);
+        doc.text(`Outstanding Principal: ${formatCurrency(payment.loan.outstandingPrincipal)}`);
         doc.moveDown(2);
 
         // Footer
@@ -179,4 +185,22 @@ async function generateReceiptPDF(paymentId) {
     });
 }
 
-module.exports = { generateReceiptPDF, uploadReceiptToS3 };
+async function deleteReceiptFromS3(receiptId) {
+    if (!s3Client || !env.s3BucketName) {
+        console.log(`[S3 Mock] Mock deleting receipt ${receiptId} (S3 bucket or credentials not set)`);
+        return;
+    }
+    const key = `receipts/${receiptId}.pdf`;
+    try {
+        const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
+        await s3Client.send(new DeleteObjectCommand({
+            Bucket: env.s3BucketName,
+            Key: key
+        }));
+        logger.info(`[S3 Info] Deleted receipt ${receiptId} from S3`);
+    } catch (err) {
+        logger.error(`[S3 Error] Delete failed for receipt ${receiptId}`, { error: err.message, stack: err.stack });
+    }
+}
+
+module.exports = { generateReceiptPDF, uploadReceiptToS3, deleteReceiptFromS3 };

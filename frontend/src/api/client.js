@@ -104,6 +104,8 @@ class ApiClient {
     seizeVehicle(data) { return this.post('/seizures', data); }
     getSeizedInventory(params = '') { return this.get(`/seizures/inventory?${params}`); }
     updateSeizureValuation(id, valuationAmount) { return this.put(`/seizures/${id}/valuation`, { valuationAmount }); }
+    resellVehicle(id, data) { return this.post(`/seizures/${id}/resell`, data); }
+    settleSeizure(id, data) { return this.post(`/seizures/${id}/settle`, data); }
 
     // --- Loans ---
     getLoans(params = '') { return this.get(`/loans?${params}`); }
@@ -115,12 +117,22 @@ class ApiClient {
 
     // --- Payments ---
     createPayment(data) { return this.post('/payments', data); }
-    getPayments(loanId) { return this.get(loanId ? `/payments?loanId=${loanId}` : '/payments'); }
+    async getPayments(loanId, params = '') { 
+        let url = loanId ? `/payments?loanId=${loanId}` : '/payments';
+        if (params) {
+            url += (url.includes('?') ? '&' : '?') + params;
+        }
+        const res = await this.get(url); 
+        return Array.isArray(res) ? res : (res?.payments || []);
+    }
     getReceipt(paymentId) { return this.get(`/payments/${paymentId}/receipt`); }
 
     // --- Expenses ---
     createExpense(data) { return this.post('/expenses', data); }
-    getExpenses() { return this.get('/expenses'); }
+    async getExpenses(params = '') { 
+        const res = await this.get(`/expenses${params ? '?' + params : ''}`); 
+        return Array.isArray(res) ? res : (res?.expenses || []);
+    }
 
     // --- Call Tasks ---
     getCallTasks(params = '') { return this.get(`/call-tasks?${params}`); }
