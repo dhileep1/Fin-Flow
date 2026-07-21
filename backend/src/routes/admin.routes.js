@@ -750,13 +750,14 @@ router.put('/audit-logs/entity/:entityType/:entityId', requireRole('admin'), asy
                         data: {
                             monthlyPrincipalAmount: monthlyPrincipal,
                             monthlyInterestAmount: monthlyInterest,
-                            monthlyDueAmount: monthlyPrincipal + monthlyInterest,
+                            monthlyDueAmount: monthlyPrincipal.plus(monthlyInterest),
                             outstandingPrincipal: P,
                             documentFee,
                             disbursedAmount
                         }
                     });
 
+                    await tx.penalty.deleteMany({ where: { loanDue: { loanId: entityId } } });
                     await tx.loanDue.deleteMany({ where: { loanId: entityId } });
 
                     const { v4: uuidv4 } = require('uuid');

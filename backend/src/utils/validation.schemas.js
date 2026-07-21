@@ -94,12 +94,6 @@ const seizeVehicleSchema = z.object({
     }),
 });
 
-const updateSeizureValuationSchema = z.object({
-    body: z.object({
-        valuationAmount: z.number().positive("Valuation amount must be positive"),
-        notes: z.string().optional().nullable(),
-    }),
-});
 
 // Guarantor Schema (Sub-object)
 const guarantorSubSchema = z.object({
@@ -150,12 +144,13 @@ const createPaymentSchema = z.object({
 const createExpenseSchema = z.object({
     body: z.object({
         amount: z.number().positive("Expense amount must be positive"),
-        category: z.enum(["rent", "salary", "utilities", "office", "other"], {
+        category: z.enum(["rent", "salary", "utilities", "office", "reconditioning", "towing", "yard", "repairs", "other"], {
             errorMap: () => ({ message: "Invalid category" })
         }),
         description: z.string().optional().nullable(),
         tags: z.array(z.string()).optional(),
         expenseDate: dateStringSchema.optional(),
+        vehicleId: uuidSchema.optional().nullable(),
     }),
 });
 
@@ -198,7 +193,6 @@ module.exports = {
     createVehicleSchema,
     updateVehicleSchema,
     seizeVehicleSchema,
-    updateSeizureValuationSchema,
     createLoanSchema,
     forecloseLoanSchema,
     createPaymentSchema,

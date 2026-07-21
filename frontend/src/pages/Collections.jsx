@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import api from '../api/client';
-import { Wallet, Calendar, User, Search, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Settings, Hash, TrendingUp, Landmark, Receipt, ArrowDownCircle, PlusCircle, X, Coins } from 'lucide-react';
+import { Wallet, Calendar, User, Search, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Settings, Hash, TrendingUp, Landmark, Receipt, ArrowDownCircle, PlusCircle, X, Coins, Car } from 'lucide-react';
 
 const PAGE_SIZE = 10;
 
@@ -30,10 +30,11 @@ export default function Collections() {
     const [payments, setPayments] = useState([]);
     const [loans, setLoans] = useState([]);
     const [expenses, setExpenses] = useState([]);
+    const [vehicleSales, setVehicleSales] = useState([]);
     const [loading, setLoading] = useState(true);
     
     // Tab and filter states
-    const [activeTab, setActiveTab] = useState('all'); // 'all' | 'payments' | 'loans' | 'expenses'
+    const [activeTab, setActiveTab] = useState('all'); // 'all' | 'payments' | 'loans' | 'expenses' | 'vehicleSales'
     const [dateFilter, setDateFilter] = useState('month'); // 'today' | 'week' | 'month' | 'year' | 'custom'
     const [aggregationLevel, setAggregationLevel] = useState('day'); // 'day' | 'week' | 'month' | 'year'
     const [customFrom, setCustomFrom] = useState('');
@@ -49,6 +50,7 @@ export default function Collections() {
     const [paymentPage, setPaymentPage] = useState(1);
     const [loansGivenPage, setLoansGivenPage] = useState(1);
     const [expensePage, setExpensePage] = useState(1);
+    const [vehicleSalePage, setVehicleSalePage] = useState(1);
 
     // Modal state for adding expense
     const [showExpenseModal, setShowExpenseModal] = useState(false);
@@ -61,15 +63,17 @@ export default function Collections() {
 
     const fetchAllData = async () => {
         try {
-            const [paymentsData, loansData, expensesData, orgData] = await Promise.all([
+            const [paymentsData, loansData, expensesData, vehicleSalesData, orgData] = await Promise.all([
                 api.getPayments(undefined, 'limit=10000'),
                 api.getLoans('limit=1000'),
                 api.getExpenses('limit=10000'),
+                api.getVehicleSales('limit=10000'),
                 api.getOrgSettings()
             ]);
-            setPayments(paymentsData || []);
+            setPayments(paymentsData?.payments || []);
             setLoans(loansData?.loans || []);
-            setExpenses(expensesData || []);
+            setExpenses(expensesData?.expenses || []);
+            setVehicleSales(vehicleSalesData || []);
             if (orgData?.settings?.startingCash !== undefined) {
                 setOpeningCashInHand(Number(orgData.settings.startingCash));
             }
@@ -176,6 +180,11 @@ export default function Collections() {
         return getFilteredTransactions(expenses, e => e.expenseDate);
     }, [expenses, dateFilter, customFrom, customTo]);
 
+    // Filter vehicle sales based on date selection
+    const dateFilteredVehicleSales = useMemo(() => {
+        return getFilteredTransactions(vehicleSales, s => s.saleDate);
+    }, [vehicleSales, dateFilter, customFrom, customTo]);
+
     // Filter payments by search query
     const filteredPayments = useMemo(() => {
         if (!searchQuery.trim()) return dateFilteredPayments;
@@ -212,6 +221,18 @@ export default function Collections() {
             return category.includes(q) || desc.includes(q) || creatorName.includes(q) || matchesTag;
         });
     }, [dateFilteredExpenses, searchQuery]);
+
+    // Filter vehicle sales by search query
+    const filteredVehicleSales = useMemo(() => {
+        if (!searchQuery.trim()) return dateFilteredVehicleSales;
+        const q = searchQuery.toLowerCase();
+        return dateFilteredVehicleSales.filter(s => {
+            const buyerName = s.buyerName?.toLowerCase() || '';
+            const vehicleNo = s.vehicle?.vehicleNumber?.toLowerCase() || '';
+            const saleType = s.saleType?.toLowerCase() || '';
+            return buyerName.includes(q) || vehicleNo.includes(q) || saleType.includes(q);
+        });
+    }, [dateFilteredVehicleSales, searchQuery]);
 
     // Combined flat list of all transactions sorted by date
     const flatTransactionsList = useMemo(() => {
@@ -274,8 +295,23 @@ export default function Collections() {
                 creator: e.creator?.name || 'System'
             });
         });
+        filteredVehicleSales.forEach(s => {
+            list.push({
+                id: `vs-${s.id}`,
+                date: s.saleDate,
+                time: s.saleDate ? new Date(s.saleDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—',
+                type: 'Vehicle Sale',
+                typeClass: 'border-purple-500 text-purple-700 bg-purple-50',
+                title: `Vehicle: ${s.vehicle?.vehicleNumber || '—'}`,
+                details: `Sale Type: ${s.saleType === 'sell' ? 'Cash' : 'Financed Downpayment'}`,
+                customer: s.buyerName || '—',
+                inflow: Number(s.saleAmount),
+                outflow: 0,
+                creator: s.creator?.name || 'System'
+            });
+        });
         return list.sort((a, b) => new Date(b.date) - new Date(a.date));
-    }, [filteredPayments, filteredLoans, filteredExpenses]);
+    }, [filteredPayments, filteredLoans, filteredExpenses, filteredVehicleSales]);
 
     // Helpers to parse date values locally
     const getLocalDateString = (dateVal) => {
@@ -345,13 +381,15 @@ export default function Collections() {
     };
 
     // Build hierarchical trees dynamically and calculate correct opening/closing balance
-    const buildGroupNode = (key, rawPayments, rawLoans, rawExpenses) => {
+    const buildGroupNode = (key, rawPayments, rawLoans, rawExpenses, rawVehicleSales) => {
         const node = {
             date: key,
             payments: rawPayments,
             loans: rawLoans,
             expenses: rawExpenses,
+            vehicleSales: rawVehicleSales,
             collection: 0,
+            vehicleSaleAmt: 0,
             docCharges: 0,
             expensesAmt: 0,
             given: 0,
@@ -360,12 +398,13 @@ export default function Collections() {
             tally: 0
         };
         rawPayments.forEach(p => { node.collection += Number(p.amount || 0); });
+        rawVehicleSales.forEach(s => { node.vehicleSaleAmt += Number(s.saleAmount || 0); });
         rawLoans.forEach(l => {
             node.docCharges += Number(l.documentFee || 0);
             node.given += Number(l.principalAmount || 0);
         });
         rawExpenses.forEach(e => { node.expensesAmt += Number(e.amount || 0); });
-        node.inflow = node.collection + node.docCharges;
+        node.inflow = node.collection + node.vehicleSaleAmt + node.docCharges;
         node.outflow = node.expensesAmt + node.given;
         node.tally = node.inflow - node.outflow;
         return node;
@@ -378,26 +417,35 @@ export default function Collections() {
         filteredPayments.forEach(p => {
             const key = getGroupKey(p.paymentDate, aggregationLevel);
             if (!key) return;
-            if (!groups[key]) groups[key] = { payments: [], loans: [], expenses: [] };
+            if (!groups[key]) groups[key] = { payments: [], loans: [], expenses: [], vehicleSales: [] };
             groups[key].payments.push(p);
         });
 
         filteredLoans.forEach(l => {
             const key = getGroupKey(l.startDate, aggregationLevel);
             if (!key) return;
-            if (!groups[key]) groups[key] = { payments: [], loans: [], expenses: [] };
+            if (!groups[key]) groups[key] = { payments: [], loans: [], expenses: [], vehicleSales: [] };
             groups[key].loans.push(l);
         });
 
         filteredExpenses.forEach(e => {
             const key = getGroupKey(e.expenseDate, aggregationLevel);
             if (!key) return;
-            if (!groups[key]) groups[key] = { payments: [], loans: [], expenses: [] };
+            if (!groups[key]) groups[key] = { payments: [], loans: [], expenses: [], vehicleSales: [] };
+            if (!groups[key].vehicleSales) groups[key].vehicleSales = [];
             groups[key].expenses.push(e);
         });
 
+        filteredVehicleSales.forEach(s => {
+            const key = getGroupKey(s.saleDate, aggregationLevel);
+            if (!key) return;
+            if (!groups[key]) groups[key] = { payments: [], loans: [], expenses: [], vehicleSales: [] };
+            if (!groups[key].vehicleSales) groups[key].vehicleSales = [];
+            groups[key].vehicleSales.push(s);
+        });
+
         const list = Object.keys(groups).map(key => {
-            return buildGroupNode(key, groups[key].payments, groups[key].loans, groups[key].expenses);
+            return buildGroupNode(key, groups[key].payments, groups[key].loans, groups[key].expenses, groups[key].vehicleSales || []);
         });
 
         // Sort ascending chronologically to compute running balance
@@ -416,7 +464,7 @@ export default function Collections() {
         });
 
         return sorted.reverse();
-    }, [filteredPayments, filteredLoans, filteredExpenses, aggregationLevel, openingCashInHand]);
+    }, [filteredPayments, filteredLoans, filteredExpenses, filteredVehicleSales, aggregationLevel, openingCashInHand]);
 
     // Apply date range filters to date groups for display
     const filteredDateGroups = useMemo(() => {
@@ -463,6 +511,20 @@ export default function Collections() {
                 inflow: 0,
                 outflow: Number(l.principalAmount),
                 creator: l.assignedStaff?.name || 'Admin'
+            });
+        });
+        (group.vehicleSales || []).forEach(s => {
+            list.push({
+                id: `vs-${s.id}`,
+                time: s.saleDate ? new Date(s.saleDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—',
+                type: 'Vehicle Sale',
+                typeClass: 'border-purple-500 text-purple-700 bg-purple-50',
+                title: 'Vehicle Sold',
+                details: `Sale Type: ${s.saleType === 'sell' ? 'Cash' : 'Financed Downpayment'} (Vehicle: ${s.vehicle?.vehicleNumber || '—'})`,
+                customer: s.buyerName || '—',
+                inflow: Number(s.saleAmount),
+                outflow: 0,
+                creator: s.creator?.name || 'System'
             });
         });
         group.expenses.forEach(e => {
@@ -513,6 +575,7 @@ export default function Collections() {
             if (activeTab === 'payments') return g.payments.length > 0;
             if (activeTab === 'loans') return g.loans.length > 0;
             if (activeTab === 'expenses') return g.expenses.length > 0;
+            if (activeTab === 'vehicleSales') return (g.vehicleSales || []).length > 0;
             return false;
         });
     }, [allDateGroups, activeTab]);
@@ -524,10 +587,11 @@ export default function Collections() {
         else if (activeTab === 'payments') page = paymentPage;
         else if (activeTab === 'loans') page = loansGivenPage;
         else if (activeTab === 'expenses') page = expensePage;
+        else if (activeTab === 'vehicleSales') page = vehicleSalePage;
 
         const start = (page - 1) * PAGE_SIZE;
         return tabGroups.slice(start, start + PAGE_SIZE);
-    }, [tabGroups, activeTab, allPage, paymentPage, loansGivenPage, expensePage]);
+    }, [tabGroups, activeTab, allPage, paymentPage, loansGivenPage, expensePage, vehicleSalePage]);
 
     const totalCount = useMemo(() => {
         if (aggregationLevel === 'none') {
@@ -535,10 +599,11 @@ export default function Collections() {
             if (activeTab === 'payments') return filteredPayments.length;
             if (activeTab === 'loans') return filteredLoans.length;
             if (activeTab === 'expenses') return filteredExpenses.length;
+            if (activeTab === 'vehicleSales') return filteredVehicleSales.length;
         }
         if (activeTab === 'all') return filteredDateGroups.length;
         return tabGroups.length;
-    }, [aggregationLevel, activeTab, flatTransactionsList, filteredPayments, filteredLoans, filteredExpenses, filteredDateGroups, tabGroups]);
+    }, [aggregationLevel, activeTab, flatTransactionsList, filteredPayments, filteredLoans, filteredExpenses, filteredVehicleSales, filteredDateGroups, tabGroups]);
 
     const totalPages = useMemo(() => {
         return Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
@@ -550,8 +615,9 @@ export default function Collections() {
         else if (activeTab === 'payments') page = paymentPage;
         else if (activeTab === 'loans') page = loansGivenPage;
         else if (activeTab === 'expenses') page = expensePage;
+        else if (activeTab === 'vehicleSales') page = vehicleSalePage;
         return (page - 1) * PAGE_SIZE + 1;
-    }, [activeTab, allPage, paymentPage, loansGivenPage, expensePage]);
+    }, [activeTab, allPage, paymentPage, loansGivenPage, expensePage, vehicleSalePage]);
 
     const endIdx = useMemo(() => {
         let page = 1;
@@ -559,8 +625,9 @@ export default function Collections() {
         else if (activeTab === 'payments') page = paymentPage;
         else if (activeTab === 'loans') page = loansGivenPage;
         else if (activeTab === 'expenses') page = expensePage;
+        else if (activeTab === 'vehicleSales') page = vehicleSalePage;
         return Math.min(page * PAGE_SIZE, totalCount);
-    }, [activeTab, allPage, paymentPage, loansGivenPage, expensePage, totalCount]);
+    }, [activeTab, allPage, paymentPage, loansGivenPage, expensePage, vehicleSalePage, totalCount]);
 
     // Sub-table and formatting helpers for grouped expansion views
     const renderGroupLabel = (key) => {
@@ -683,6 +750,43 @@ export default function Collections() {
         </div>
     );
 
+    const renderVehicleSalesSubTable = (list, isFlat = false) => (
+        <div className={isFlat ? "table-container p-0 border-0 shadow-none" : "border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm"} style={isFlat ? {} : { margin: '4px 0 12px 0' }}>
+            <table className="w-full text-xs">
+                <thead>
+                    <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
+                        <th className="px-4 py-2.5 text-left">Date</th>
+                        <th className="px-4 py-2.5 text-left">Vehicle No</th>
+                        <th className="px-4 py-2.5 text-left">Sale Type</th>
+                        <th className="px-4 py-2.5 text-left">Buyer</th>
+                        <th className="px-4 py-2.5 text-center">Amount</th>
+                        <th className="px-4 py-2.5 text-center">Recorded By</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                    {list.map(s => (
+                        <tr key={s.id} className="hover:bg-slate-50/50">
+                            <td className="px-4 py-3 text-slate-500 font-medium">{formatDate(s.saleDate)}</td>
+                            <td className="px-4 py-3"><span className="text-slate-900 font-semibold">{s.vehicle?.vehicleNumber || '—'}</span></td>
+                            <td className="px-4 py-3">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${s.saleType === 'sell' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
+                                    {s.saleType === 'sell' ? 'Cash Sale' : 'Financed'}
+                                </span>
+                            </td>
+                            <td className="px-4 py-3 text-slate-900 font-semibold">{s.buyerName || '—'}</td>
+                            <td className="px-4 py-3 text-center text-emerald-600 font-bold">{fmtShort(Number(s.saleAmount))}</td>
+                            <td className="px-4 py-3 text-center">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold">
+                                    {s.creator?.name || 'System'}
+                                </span>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+
     // Calculate sum of principal and interest from allocationDetails
     const getBreakdown = (payment) => {
         let principalPaid = 0;
@@ -730,8 +834,20 @@ export default function Collections() {
             if (e.category === 'salary') totalSalaryAmt += amt;
         });
 
-        return { totalPrincipal, totalInterest, totalAmount, totalDocCharges, totalLoanAmount, totalExpenseAmt, totalRentAmt, totalSalaryAmt };
-    }, [filteredPayments, filteredLoans, filteredExpenses]);
+        let totalVehicleSaleAmt = 0;
+        let totalDownPaymentAmt = 0;
+        let vehicleSoldCount = 0;
+        filteredVehicleSales.forEach(s => {
+            const amt = Number(s.saleAmount || 0);
+            totalVehicleSaleAmt += amt;
+            vehicleSoldCount++;
+            if (s.saleType === 'sell_with_finance') {
+                totalDownPaymentAmt += amt;
+            }
+        });
+
+        return { totalPrincipal, totalInterest, totalAmount, totalDocCharges, totalLoanAmount, totalExpenseAmt, totalRentAmt, totalSalaryAmt, totalVehicleSaleAmt, totalDownPaymentAmt, vehicleSoldCount };
+    }, [filteredPayments, filteredLoans, filteredExpenses, filteredVehicleSales]);
 
     const renderFlatTable = () => {
         if (activeTab === 'all') {
@@ -832,6 +948,15 @@ export default function Collections() {
                 </div>
             );
         }
+
+        if (activeTab === 'vehicleSales') {
+            const list = filteredVehicleSales.slice((vehicleSalePage - 1) * PAGE_SIZE, vehicleSalePage * PAGE_SIZE);
+            return (
+                <div className="border-t border-slate-200">
+                    {renderVehicleSalesSubTable(list, true)}
+                </div>
+            );
+        }
         
         return null;
     };
@@ -913,6 +1038,16 @@ export default function Collections() {
                     >
                         <ArrowDownCircle size={16} />
                         Expenses
+                    </button>
+                    <button
+                        role="tab"
+                        aria-selected={activeTab === 'vehicleSales'}
+                        className={`cmd-tab ${activeTab === 'vehicleSales' ? 'cmd-tab--active' : ''}`}
+                        onClick={() => setActiveTab('vehicleSales')}
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                    >
+                        <Car size={16} />
+                        Vehicle Sales
                     </button>
                 </div>
 
@@ -1196,18 +1331,19 @@ export default function Collections() {
                         </div>
                     </div>
                 </div>
-            </div>            <div style={{ display: 'grid', gridTemplateColumns: activeTab === 'all' ? 'repeat(5, 1fr)' : 'repeat(3, 1fr)', gap: '16px', marginBottom: '12px' }}>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: activeTab === 'all' ? 'repeat(6, 1fr)' : 'repeat(3, 1fr)', gap: '16px', marginBottom: '12px' }}>
                 {activeTab === 'all' ? (
                     <>
-                        {/* Collections & Doc Charges (Green Group) */}
+                        {/* Collections & Doc Charges & Vehicle Sales (Green Group - 3 items = span 3) */}
                         <div style={{
                             display: 'flex',
-                            gap: '16px',
+                            gap: '12px',
                             padding: '12px 16px',
                             backgroundColor: '#f0fdf4',
                             border: '2px solid #bbf7d0',
                             borderRadius: '12px',
-                            gridColumn: 'span 2',
+                            gridColumn: 'span 3',
                             minWidth: '0'
                         }}>
                             <div className="progress-card" style={{ background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, flex: 1, minWidth: '0' }}>
@@ -1215,9 +1351,9 @@ export default function Collections() {
                                     <Wallet size={20} />
                                 </div>
                                 <div className="progress-card__body">
-                                    <span className="progress-card__title" style={{ color: '#166534' }}>Collections (EMI)</span>
+                                    <span className="progress-card__title" style={{ color: '#166534', whiteSpace: 'nowrap' }}>Collections</span>
                                     <div className="progress-card__values">
-                                        <span className="progress-card__actual" style={{ color: '#15803d', fontSize: '18px' }}>
+                                        <span className="progress-card__actual" style={{ color: '#15803d', fontSize: '17px' }}>
                                             {fmt(totals.totalAmount)}
                                         </span>
                                     </div>
@@ -1231,20 +1367,36 @@ export default function Collections() {
                                     <Receipt size={20} />
                                 </div>
                                 <div className="progress-card__body">
-                                    <span className="progress-card__title" style={{ color: '#166534' }}>Doc Charges</span>
+                                    <span className="progress-card__title" style={{ color: '#166534', whiteSpace: 'nowrap' }}>Doc Charges</span>
                                     <div className="progress-card__values">
-                                        <span className="progress-card__actual" style={{ color: '#15803d', fontSize: '18px' }}>
+                                        <span className="progress-card__actual" style={{ color: '#15803d', fontSize: '17px' }}>
                                             {fmt(totals.totalDocCharges)}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style={{ width: '1px', alignSelf: 'stretch', backgroundColor: '#bbf7d0' }} />
+
+                            <div className="progress-card" style={{ background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, flex: 1, minWidth: '0' }}>
+                                <div className="progress-card__icon-circle progress-card__icon-circle--emerald" style={{ background: '#ffffff' }}>
+                                    <Car size={20} />
+                                </div>
+                                <div className="progress-card__body">
+                                    <span className="progress-card__title" style={{ color: '#166534', whiteSpace: 'nowrap' }}>Vehicle Sales</span>
+                                    <div className="progress-card__values">
+                                        <span className="progress-card__actual" style={{ color: '#15803d', fontSize: '17px' }}>
+                                            {fmt(totals.totalVehicleSaleAmt)}
                                         </span>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        {/* Outflows / Expenses & Principal Disbursed (Red/Rose Group) */}
+                        {/* Outflows / Expenses & Principal Disbursed (Red/Rose Group - 2 items = span 2) */}
                         <div style={{
                             display: 'flex',
-                            gap: '16px',
+                            gap: '12px',
                             padding: '12px 16px',
                             backgroundColor: '#fef2f2',
                             border: '2px solid #fecaca',
@@ -1257,9 +1409,9 @@ export default function Collections() {
                                     <ArrowDownCircle size={20} />
                                 </div>
                                 <div className="progress-card__body">
-                                    <span className="progress-card__title" style={{ color: '#991b1b' }}>Expenses</span>
+                                    <span className="progress-card__title" style={{ color: '#991b1b', whiteSpace: 'nowrap' }}>Expenses</span>
                                     <div className="progress-card__values">
-                                        <span className="progress-card__actual" style={{ color: '#b91c1c', fontSize: '18px' }}>
+                                        <span className="progress-card__actual" style={{ color: '#b91c1c', fontSize: '17px' }}>
                                             {fmt(totals.totalExpenseAmt)}
                                         </span>
                                     </div>
@@ -1273,9 +1425,9 @@ export default function Collections() {
                                     <Landmark size={20} />
                                 </div>
                                 <div className="progress-card__body">
-                                    <span className="progress-card__title" style={{ color: '#991b1b' }}>Principal Disbursed</span>
+                                    <span className="progress-card__title" style={{ color: '#991b1b', whiteSpace: 'nowrap' }}>Capital Disbursed</span>
                                     <div className="progress-card__values">
-                                        <span className="progress-card__actual" style={{ color: '#b91c1c', fontSize: '18px' }}>
+                                        <span className="progress-card__actual" style={{ color: '#b91c1c', fontSize: '17px' }}>
                                             {fmt(totals.totalLoanAmount)}
                                         </span>
                                     </div>
@@ -1283,7 +1435,7 @@ export default function Collections() {
                             </div>
                         </div>
 
-                        {/* Net Cash Flow (Neutral Slate Group) */}
+                        {/* Net Cash Flow (Neutral Slate Group - 1 item = span 1) */}
                         <div style={{
                             display: 'flex',
                             padding: '12px 16px',
@@ -1294,7 +1446,7 @@ export default function Collections() {
                             minWidth: '0'
                         }}>
                             {(() => {
-                                const netFlow = (totals.totalAmount + totals.totalDocCharges) - (totals.totalExpenseAmt + totals.totalLoanAmount);
+                                const netFlow = (totals.totalAmount + totals.totalDocCharges + totals.totalVehicleSaleAmt) - (totals.totalExpenseAmt + totals.totalLoanAmount);
                                 const isPositive = netFlow >= 0;
                                 return (
                                     <div className="progress-card" style={{ background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, flex: 1, minWidth: '0' }}>
@@ -1302,7 +1454,7 @@ export default function Collections() {
                                             <TrendingUp size={20} />
                                         </div>
                                         <div className="progress-card__body">
-                                            <span className="progress-card__title" style={{ color: '#475569' }}>Net Cash Flow</span>
+                                            <span className="progress-card__title" style={{ color: '#475569', whiteSpace: 'nowrap' }}>Net Cash</span>
                                             <div className="progress-card__values">
                                                 <span className="progress-card__actual" style={{ color: isPositive ? '#10b981' : '#ef4444', fontSize: '18px' }}>
                                                     {fmt(netFlow)}
@@ -1402,7 +1554,7 @@ export default function Collections() {
                             </div>
                         </div>
                     </>
-                ) : (
+                ) : activeTab === 'expenses' ? (
                     <>
                         <div className="progress-card">
                             <div className="progress-card__icon-circle progress-card__icon-circle--rose" style={{ background: '#fef2f2', color: '#ef4444' }}>
@@ -1446,7 +1598,51 @@ export default function Collections() {
                             </div>
                         </div>
                     </>
-                )}
+                ) : activeTab === 'vehicleSales' ? (
+                    <>
+                        <div className="progress-card">
+                            <div className="progress-card__icon-circle progress-card__icon-circle--slate">
+                                <Hash size={24} />
+                            </div>
+                            <div className="progress-card__body">
+                                <span className="progress-card__title">Vehicles Sold</span>
+                                <div className="progress-card__values">
+                                    <span className="progress-card__actual" style={{ color: 'var(--slate-700)' }}>
+                                        {totals.vehicleSoldCount} {totals.vehicleSoldCount === 1 ? 'Vehicle' : 'Vehicles'}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="progress-card">
+                            <div className="progress-card__icon-circle progress-card__icon-circle--emerald">
+                                <Car size={24} />
+                            </div>
+                            <div className="progress-card__body">
+                                <span className="progress-card__title">Total Sale Amount</span>
+                                <div className="progress-card__values">
+                                    <span className="progress-card__actual" style={{ color: 'var(--color-success)' }}>
+                                        {fmt(totals.totalVehicleSaleAmt)}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="progress-card">
+                            <div className="progress-card__icon-circle progress-card__icon-circle--blue">
+                                <Coins size={24} />
+                            </div>
+                            <div className="progress-card__body">
+                                <span className="progress-card__title">Financed Down Payments</span>
+                                <div className="progress-card__values">
+                                    <span className="progress-card__actual" style={{ color: 'var(--slate-900)' }}>
+                                        {fmt(totals.totalDownPaymentAmt)}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </>
+                ) : null}
             </div>
 
             {/* Content Tables */}
@@ -1557,21 +1753,26 @@ export default function Collections() {
                                                 const subGroups = {};
                                                 group.payments.forEach(p => {
                                                     const k = getLocalDateString(p.paymentDate).substring(0, 7); // YYYY-MM
-                                                    if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [] };
+                                                    if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [], vehicleSales: [] };
                                                     subGroups[k].payments.push(p);
                                                 });
                                                 group.loans.forEach(l => {
                                                     const k = getLocalDateString(l.startDate).substring(0, 7);
-                                                    if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [] };
+                                                    if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [], vehicleSales: [] };
                                                     subGroups[k].loans.push(l);
                                                 });
                                                 group.expenses.forEach(e => {
                                                     const k = getLocalDateString(e.expenseDate).substring(0, 7);
-                                                    if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [] };
+                                                    if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [], vehicleSales: [] };
                                                     subGroups[k].expenses.push(e);
                                                 });
+                                                (group.vehicleSales || []).forEach(s => {
+                                                    const k = getLocalDateString(s.saleDate).substring(0, 7);
+                                                    if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [], vehicleSales: [] };
+                                                    subGroups[k].vehicleSales.push(s);
+                                                });
 
-                                                const subList = Object.keys(subGroups).map(k => buildGroupNode(k, subGroups[k].payments, subGroups[k].loans, subGroups[k].expenses)).sort((a,b) => b.date.localeCompare(a.date));
+                                                const subList = Object.keys(subGroups).map(k => buildGroupNode(k, subGroups[k].payments, subGroups[k].loans, subGroups[k].expenses, subGroups[k].vehicleSales || [])).sort((a,b) => b.date.localeCompare(a.date));
 
                                                 return (
                                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1620,21 +1821,26 @@ export default function Collections() {
                                             const subGroups = {};
                                             group.payments.forEach(p => {
                                                 const k = getLocalDateString(p.paymentDate);
-                                                if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [] };
+                                                if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [], vehicleSales: [] };
                                                 subGroups[k].payments.push(p);
                                             });
                                             group.loans.forEach(l => {
                                                 const k = getLocalDateString(l.startDate);
-                                                if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [] };
+                                                if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [], vehicleSales: [] };
                                                 subGroups[k].loans.push(l);
                                             });
                                             group.expenses.forEach(e => {
                                                 const k = getLocalDateString(e.expenseDate);
-                                                if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [] };
+                                                if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [], vehicleSales: [] };
                                                 subGroups[k].expenses.push(e);
                                             });
+                                            (group.vehicleSales || []).forEach(s => {
+                                                const k = getLocalDateString(s.saleDate);
+                                                if (!subGroups[k]) subGroups[k] = { payments: [], loans: [], expenses: [], vehicleSales: [] };
+                                                subGroups[k].vehicleSales.push(s);
+                                            });
 
-                                            const subList = Object.keys(subGroups).map(k => buildGroupNode(k, subGroups[k].payments, subGroups[k].loans, subGroups[k].expenses)).sort((a,b) => b.date.localeCompare(a.date));
+                                            const subList = Object.keys(subGroups).map(k => buildGroupNode(k, subGroups[k].payments, subGroups[k].loans, subGroups[k].expenses, subGroups[k].vehicleSales || [])).sort((a,b) => b.date.localeCompare(a.date));
 
                                             return (
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1832,6 +2038,9 @@ export default function Collections() {
                                         } else if (activeTab === 'expenses') {
                                             count = g.expenses.length;
                                             total = g.expensesAmt;
+                                        } else if (activeTab === 'vehicleSales') {
+                                            count = (g.vehicleSales || []).length;
+                                            total = g.vehicleSaleAmt;
                                         }
 
                                         return (
@@ -1859,7 +2068,7 @@ export default function Collections() {
                                                     </td>
                                                     <td className="px-6 py-4 text-left text-slate-900 font-semibold">{renderGroupLabel(g.date)}</td>
                                                     <td className="px-6 py-4 text-center text-slate-500 font-medium">{count} {count === 1 ? 'entry' : 'entries'}</td>
-                                                    <td className="px-6 py-4 text-right text-slate-900 font-bold" style={{ color: activeTab === 'payments' ? 'var(--color-success)' : '#ef4444' }}>
+                                                    <td className="px-6 py-4 text-right text-slate-900 font-bold" style={{ color: activeTab === 'payments' || activeTab === 'vehicleSales' ? 'var(--color-success)' : '#ef4444' }}>
                                                         {fmt(total)}
                                                     </td>
                                                 </tr>
@@ -1869,6 +2078,7 @@ export default function Collections() {
                                                             {activeTab === 'payments' && renderPaymentsSubTable(g.payments)}
                                                             {activeTab === 'loans' && renderLoansGivenSubTable(g.loans)}
                                                             {activeTab === 'expenses' && renderExpensesSubTable(g.expenses)}
+                                                            {activeTab === 'vehicleSales' && renderVehicleSalesSubTable(g.vehicleSales || [])}
                                                         </td>
                                                     </tr>
                                                 )}
@@ -1889,6 +2099,7 @@ export default function Collections() {
                     else if (activeTab === 'payments') { page = paymentPage; setPage = setPaymentPage; }
                     else if (activeTab === 'loans') { page = loansGivenPage; setPage = setLoansGivenPage; }
                     else if (activeTab === 'expenses') { page = expensePage; setPage = setExpensePage; }
+                    else if (activeTab === 'vehicleSales') { page = vehicleSalePage; setPage = setVehicleSalePage; }
 
                     return totalCount > 0 && (
                         <div className="table-pagination" style={{ padding: 'var(--space-4) var(--space-6)', borderTop: '1px solid var(--slate-100)' }}>

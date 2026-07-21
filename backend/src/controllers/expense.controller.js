@@ -2,7 +2,7 @@ const expenseService = require('../services/expense.service');
 
 async function createExpense(req, res, next) {
     try {
-        const { amount, category, description, tags, expenseDate } = req.body;
+        const { amount, category, description, tags, expenseDate, vehicleId } = req.body;
 
         if (!amount || !category) {
             return res.status(400).json({ error: 'Amount and Category are required' });
@@ -19,7 +19,8 @@ async function createExpense(req, res, next) {
             description,
             tags,
             createdBy: req.user.id,
-            expenseDate
+            expenseDate,
+            vehicleId
         });
 
         res.status(201).json(expense);

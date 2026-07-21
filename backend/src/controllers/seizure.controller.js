@@ -2,7 +2,7 @@ const seizureService = require('../services/seizure.service');
 
 async function seizeVehicle(req, res, next) {
     try {
-        const { loanId, vehicleId, yardLocation, valuationAmount, notes, seizureDate } = req.body;
+        const { loanId, vehicleId, yardLocation, notes, seizureDate } = req.body;
         
         if (!loanId || !vehicleId) {
             return res.status(400).json({ error: 'Loan ID and Vehicle ID are required' });
@@ -14,7 +14,6 @@ async function seizeVehicle(req, res, next) {
             vehicleId,
             userId: req.user.id,
             yardLocation,
-            valuationAmount,
             notes,
             seizureDate
         });
@@ -35,57 +34,24 @@ async function getSeizedInventory(req, res, next) {
     }
 }
 
-async function updateSeizureValuation(req, res, next) {
-    try {
-        const { id } = req.params;
-        const { valuationAmount } = req.body;
-        
-        const seizure = await seizureService.updateSeizureValuation({
-            orgId: req.orgId,
-            seizureId: id,
-            valuationAmount
-        });
 
-        res.json(seizure);
-    } catch (err) {
-        next(err);
-    }
-}
 
-async function resellVehicle(req, res, next) {
-    try {
-        const { id } = req.params;
-        const { salePrice, buyerName, buyerPhone, paymentMethod } = req.body;
-        
-        const seizure = await seizureService.resellVehicle({
-            orgId: req.orgId,
-            seizureId: id,
-            salePrice,
-            buyerName,
-            buyerPhone,
-            paymentMethod,
-            userId: req.user.id
-        });
-
-        res.json(seizure);
-    } catch (err) {
-        next(err);
-    }
-}
 
 async function settleSeizure(req, res, next) {
     try {
         const { id } = req.params;
-        const { settlementType, settlementAmount, buyerName, buyerPhone, buyerAddress } = req.body;
+        const { settlementType, settlementAmount, downPayment, buyerName, buyerPhone, buyerAddress, paymentMethod } = req.body;
         
         const result = await seizureService.settleSeizure({
             orgId: req.orgId,
             seizureId: id,
             settlementType,
             settlementAmount,
+            downPayment,
             buyerName,
             buyerPhone,
             buyerAddress,
+            paymentMethod,
             userId: req.user.id
         });
 
@@ -95,10 +61,18 @@ async function settleSeizure(req, res, next) {
     }
 }
 
+async function getVehicleSales(req, res, next) {
+    try {
+        const sales = await seizureService.getVehicleSales(req.orgId);
+        res.json(sales);
+    } catch (err) {
+        next(err);
+    }
+}
+
 module.exports = {
     seizeVehicle,
     getSeizedInventory,
-    updateSeizureValuation,
-    resellVehicle,
-    settleSeizure
+    settleSeizure,
+    getVehicleSales
 };

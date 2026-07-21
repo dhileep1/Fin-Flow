@@ -1,7 +1,7 @@
 const prisma = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
 
-async function createExpense({ orgId, amount, category, description, tags, createdBy, expenseDate }) {
+async function createExpense({ orgId, amount, category, description, tags, createdBy, expenseDate, vehicleId }) {
     return prisma.expense.create({
         data: {
             id: uuidv4(),
@@ -11,6 +11,7 @@ async function createExpense({ orgId, amount, category, description, tags, creat
             description,
             tags: tags || [],
             createdBy,
+            vehicleId: vehicleId || null,
             ...(expenseDate && { expenseDate: new Date(expenseDate) })
         },
         include: {

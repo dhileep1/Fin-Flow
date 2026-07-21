@@ -7,7 +7,7 @@ const { v4: uuidv4 } = require('uuid');
  * Seize a vehicle associated with a loan.
  * Executes within a Prisma transaction.
  */
-async function seizeVehicle({ orgId, loanId, vehicleId, userId, yardLocation, valuationAmount, notes, seizureDate }) {
+async function seizeVehicle({ orgId, loanId, vehicleId, userId, yardLocation, notes, seizureDate }) {
     const seizureId = uuidv4();
     
     const result = await prisma.$transaction(async (tx) => {
@@ -32,7 +32,6 @@ async function seizeVehicle({ orgId, loanId, vehicleId, userId, yardLocation, va
                 loanId,
                 seizedBy: userId,
                 yardLocation,
-                valuationAmount: valuationAmount ? Number(valuationAmount) : null,
                 status: 'in_yard',
                 notes,
                 seizureDate: seizureDate ? new Date(seizureDate) : undefined
@@ -49,7 +48,7 @@ async function seizeVehicle({ orgId, loanId, vehicleId, userId, yardLocation, va
         action: 'vehicle_seizure_created',
         entityType: 'vehicle_seizure',
         entityId: seizureId,
-        details: { loanId, vehicleId, yardLocation, valuationAmount, seizureDate }
+        details: { loanId, vehicleId, yardLocation, seizureDate }
     });
 
     return result;
@@ -99,207 +98,318 @@ async function getSeizedInventory(orgId, { status } = {}) {
     });
 }
 
+
+
 /**
- * Update the valuation amount of a vehicle seizure.
+ * Helper: Calculate total payments collected for a loan.
  */
-async function updateSeizureValuation({ orgId, seizureId, valuationAmount }) {
-    return prisma.vehicleSeizure.update({
-        where: { id: seizureId, orgId },
-        data: {
-            valuationAmount: valuationAmount ? Number(valuationAmount) : null
-        }
+async function getTotalPaymentsCollected(tx, orgId, loanId) {
+    const result = await tx.payment.aggregate({
+        where: { orgId, loanId },
+        _sum: { amount: true }
     });
+    return new Prisma.Decimal(result._sum.amount || 0);
 }
 
 /**
- * Resell a repossessed/seized vehicle outright for cash.
+ * Helper: Resolve or create a buyer customer.
  */
-async function resellVehicle({ orgId, seizureId, salePrice, buyerName, buyerPhone, paymentMethod, userId }) {
-    const result = await prisma.$transaction(async (tx) => {
-        // 1. Get Seizure details
-        const seizure = await tx.vehicleSeizure.findFirst({
-            where: { id: seizureId, orgId }
-        });
-        if (!seizure) {
-            throw new Error('Seizure record not found');
-        }
-
-        // 2. Update VehicleSeizure status to "sold"
-        const updatedSeizure = await tx.vehicleSeizure.update({
-            where: { id: seizureId, orgId },
-            data: { status: 'sold' }
-        });
-
-        // 3. Update Vehicle status to "sold"
-        await tx.vehicle.update({
-            where: { id: seizure.vehicleId, orgId },
-            data: { status: 'sold' }
-        });
-
-        // 4. Update original Loan status to "closed"
-        await tx.loan.update({
-            where: { id: seizure.loanId, orgId },
-            data: { status: 'closed' }
-        });
-
-        return { seizure: updatedSeizure, originalLoanId: seizure.loanId };
-    });
-
-    // 5. Record the Cash Resale Payment using core payment logic (creates transaction/receipt)
-    if (salePrice > 0) {
-        const paymentService = require('./payment.service');
-        await paymentService.recordPayment({
-            orgId,
-            loanId: result.originalLoanId,
-            amount: salePrice,
-            paymentMethod: paymentMethod || 'cash',
-            referenceNumber: `Resale: ${buyerName || 'Buyer'} (${buyerPhone || 'N/A'})`,
-            createdBy: userId
+async function resolveOrCreateBuyer(tx, orgId, buyerName, buyerPhone, buyerAddress) {
+    let buyerCustomer = null;
+    if (buyerPhone) {
+        buyerCustomer = await tx.customer.findFirst({
+            where: { orgId, phone: buyerPhone }
         });
     }
-
-    // 6. Log audit
-    await logAudit({
-        orgId,
-        userId,
-        action: 'vehicle_resold',
-        entityType: 'vehicle_seizure',
-        entityId: seizureId,
-        details: { salePrice, buyerName, buyerPhone, paymentMethod }
-    });
-
-    return result.seizure;
+    if (!buyerCustomer && buyerName) {
+        buyerCustomer = await tx.customer.create({
+            data: {
+                id: uuidv4(),
+                orgId,
+                name: buyerName,
+                phone: buyerPhone || '',
+                address: buyerAddress || ''
+            }
+        });
+    }
+    return buyerCustomer;
 }
 
 /**
- * Settle a vehicle seizure (Owner Redemption, Cash Sale, or Financed Sale).
+ * Settle a vehicle seizure. Three paths:
+ * 
+ * 1. "redemption" — Owner reclaims. Payment recorded against old loan, vehicle → active, loan → active.
+ * 2. "cash_sale" — Sell outright. VehicleSale created, old loan → written_off, vehicle → sold.
+ * 3. "financed_sale" — Sell with financing. Down payment as VehicleSale, old loan → written_off,
+ *                       vehicle → active with new owner, frontend redirects to New Loan wizard.
  */
-async function settleSeizure({ orgId, seizureId, settlementType, settlementAmount, buyerName, buyerPhone, buyerAddress, userId }) {
-    const result = await prisma.$transaction(async (tx) => {
-        // 1. Get Seizure details with relations
-        const seizure = await tx.vehicleSeizure.findFirst({
-            where: { id: seizureId, orgId },
-            include: { vehicle: true, loan: true }
-        });
-        if (!seizure) {
-            throw new Error('Seizure record not found');
-        }
+async function settleSeizure({
+    orgId, seizureId, settlementType,
+    settlementAmount, downPayment,
+    buyerName, buyerPhone, buyerAddress,
+    paymentMethod, userId
+}) {
+    // ──────────────────────────────────────────────
+    // PATH 1: RECLAIM (Owner Redemption)
+    // ──────────────────────────────────────────────
+    if (settlementType === 'reclaim') {
+        const result = await prisma.$transaction(async (tx) => {
+            const seizure = await tx.vehicleSeizure.findFirst({
+                where: { id: seizureId, orgId },
+                include: { vehicle: true, loan: true }
+            });
+            if (!seizure) throw new Error('Seizure record not found');
 
-        // 2. Fetch all unpaid dues of the associated loan to calculate total outstanding
-        const dues = await tx.loanDue.findMany({
-            where: { orgId, loanId: seizure.loanId, status: { not: 'paid' } }
-        });
-        const totalOutstanding = dues.reduce((sum, due) => {
-            return sum.plus(new Prisma.Decimal(due.totalDue).minus(due.amountPaid));
-        }, new Prisma.Decimal(0));
-
-        const lossAmount = Prisma.Decimal.max(0, totalOutstanding.minus(new Prisma.Decimal(settlementAmount || 0)));
-
-        let buyerCustomer = null;
-
-        // 3. Handle status/ownership changes based on type
-        if (settlementType === 'redemption') {
-            // Redemption: Return vehicle status to active
+            // Vehicle → active
             await tx.vehicle.update({
                 where: { id: seizure.vehicleId, orgId },
                 data: { status: 'active' }
             });
-        } else {
-            // Cash Sale or Financed Sale: Resolve new buyer customer
-            if (buyerPhone) {
-                buyerCustomer = await tx.customer.findFirst({
-                    where: { orgId, phone: buyerPhone }
+
+            // Loan → active (resumes normal schedule)
+            await tx.loan.update({
+                where: { id: seizure.loanId, orgId },
+                data: { status: 'active' }
+            });
+
+            // Seizure → settled
+            const updatedSeizure = await tx.vehicleSeizure.update({
+                where: { id: seizureId, orgId },
+                data: {
+                    status: 'settled',
+                    settlementType: 'reclaim',
+                    settlementAmount: new Prisma.Decimal(settlementAmount || 0),
+                    settledAt: new Date(),
+                    settledBy: 'Original Customer'
+                }
+            });
+
+            return { seizure: updatedSeizure, loanId: seizure.loanId };
+        });
+
+        // Record payment against old loan (outside transaction since paymentService has its own)
+        if (settlementAmount > 0) {
+            try {
+                const paymentService = require('./payment.service');
+                await paymentService.recordPayment({
+                    orgId,
+                    loanId: result.loanId,
+                    amount: settlementAmount,
+                    paymentMethod: paymentMethod || 'cash',
+                    referenceNumber: `Reclaim: Vehicle reclaimed by owner`,
+                    createdBy: userId
                 });
+            } catch (paymentErr) {
+                console.error('Failed to record reclaim payment:', paymentErr);
             }
-            if (!buyerCustomer && buyerName) {
-                buyerCustomer = await tx.customer.create({
+        }
+
+        await logAudit({
+            orgId, userId,
+            action: 'vehicle_seizure_settled',
+            entityType: 'vehicle_seizure',
+            entityId: seizureId,
+            details: { settlementType: 'reclaim', settlementAmount }
+        });
+
+        return { seizure: result.seizure };
+    }
+
+    // ──────────────────────────────────────────────
+    // PATH 2: SELL (Cash Sale)
+    // ──────────────────────────────────────────────
+    if (settlementType === 'sell') {
+        const saleAmount = Number(settlementAmount || 0);
+
+        const result = await prisma.$transaction(async (tx) => {
+            const seizure = await tx.vehicleSeizure.findFirst({
+                where: { id: seizureId, orgId },
+                include: { vehicle: true, loan: true }
+            });
+            if (!seizure) throw new Error('Seizure record not found');
+
+            // Resolve buyer
+            const buyerCustomer = await resolveOrCreateBuyer(tx, orgId, buyerName, buyerPhone, buyerAddress);
+            const newOwnerId = buyerCustomer ? buyerCustomer.id : seizure.vehicle.customerId;
+
+            // Calculate loss: disbursed - total payments collected - sale amount
+            const totalCollected = await getTotalPaymentsCollected(tx, orgId, seizure.loanId);
+            const disbursed = new Prisma.Decimal(seizure.loan.disbursedAmount || seizure.loan.principalAmount);
+            const lossAmount = Prisma.Decimal.max(
+                new Prisma.Decimal(0),
+                disbursed.minus(totalCollected).minus(new Prisma.Decimal(saleAmount))
+            );
+
+            // Create VehicleSale record (inflow)
+            const vehicleSale = await tx.vehicleSale.create({
+                data: {
+                    id: uuidv4(),
+                    orgId,
+                    seizureId,
+                    vehicleId: seizure.vehicleId,
+                    loanId: seizure.loanId,
+                    saleAmount: new Prisma.Decimal(saleAmount),
+                    saleType: 'sell',
+                    buyerName,
+                    buyerPhone,
+                    buyerCustomerId: buyerCustomer?.id || null,
+                    paymentMethod: paymentMethod || 'cash',
+                    createdBy: userId
+                }
+            });
+
+            // Vehicle → sold, transfer ownership
+            await tx.vehicle.update({
+                where: { id: seizure.vehicleId, orgId },
+                data: { status: 'sold', customerId: newOwnerId }
+            });
+
+            // Loan → written_off (dues stay untouched)
+            await tx.loan.update({
+                where: { id: seizure.loanId, orgId },
+                data: { status: 'written_off' }
+            });
+
+            // Seizure → sold
+            const updatedSeizure = await tx.vehicleSeizure.update({
+                where: { id: seizureId, orgId },
+                data: {
+                    status: 'sold',
+                    settlementType: 'sell',
+                    settlementAmount: new Prisma.Decimal(saleAmount),
+                    lossAmount,
+                    settledAt: new Date(),
+                    settledBy: buyerName || 'Buyer',
+                    buyerName,
+                    buyerPhone,
+                    buyerCustomerId: buyerCustomer?.id || null
+                }
+            });
+
+            return { seizure: updatedSeizure, vehicleSale, buyerCustomer };
+        });
+
+        await logAudit({
+            orgId, userId,
+            action: 'vehicle_seizure_settled',
+            entityType: 'vehicle_seizure',
+            entityId: seizureId,
+            details: { settlementType: 'sell', saleAmount, buyerName, lossAmount: Number(result.seizure.lossAmount) }
+        });
+
+        return result;
+    }
+
+    // ──────────────────────────────────────────────
+    // PATH 3: FINANCE (Financed Sale)
+    // ──────────────────────────────────────────────
+    if (settlementType === 'sell_with_finance') {
+        const dpAmount = Number(downPayment || 0);
+
+        const result = await prisma.$transaction(async (tx) => {
+            const seizure = await tx.vehicleSeizure.findFirst({
+                where: { id: seizureId, orgId },
+                include: { vehicle: true, loan: true }
+            });
+            if (!seizure) throw new Error('Seizure record not found');
+
+            // Resolve buyer
+            const buyerCustomer = await resolveOrCreateBuyer(tx, orgId, buyerName, buyerPhone, buyerAddress);
+            if (!buyerCustomer) throw new Error('Buyer details are required for financed sale');
+
+            // Calculate loss: disbursed - total payments collected - down payment
+            const totalCollected = await getTotalPaymentsCollected(tx, orgId, seizure.loanId);
+            const disbursed = new Prisma.Decimal(seizure.loan.disbursedAmount || seizure.loan.principalAmount);
+            const lossAmount = Prisma.Decimal.max(
+                new Prisma.Decimal(0),
+                disbursed.minus(totalCollected).minus(new Prisma.Decimal(dpAmount))
+            );
+
+            // Create VehicleSale record for down payment (inflow)
+            let vehicleSale = null;
+            if (dpAmount > 0) {
+                vehicleSale = await tx.vehicleSale.create({
                     data: {
                         id: uuidv4(),
                         orgId,
-                        name: buyerName,
-                        phone: buyerPhone || '',
-                        address: buyerAddress || ''
+                        seizureId,
+                        vehicleId: seizure.vehicleId,
+                        loanId: seizure.loanId,
+                        saleAmount: new Prisma.Decimal(dpAmount),
+                        saleType: 'sell_with_finance',
+                        buyerName,
+                        buyerPhone,
+                        buyerCustomerId: buyerCustomer.id,
+                        paymentMethod: 'cash',
+                        createdBy: userId
                     }
                 });
             }
 
-            const newOwnerId = buyerCustomer ? buyerCustomer.id : seizure.vehicle.customerId;
-
-            // Update ownership and status on Vehicle
+            // Vehicle → active, transfer ownership to buyer
             await tx.vehicle.update({
                 where: { id: seizure.vehicleId, orgId },
+                data: { status: 'active', customerId: buyerCustomer.id }
+            });
+
+            // Loan → written_off (dues stay untouched)
+            await tx.loan.update({
+                where: { id: seizure.loanId, orgId },
+                data: { status: 'written_off' }
+            });
+
+            // Seizure → sold
+            const updatedSeizure = await tx.vehicleSeizure.update({
+                where: { id: seizureId, orgId },
                 data: {
-                    customerId: newOwnerId,
-                    status: settlementType === 'cash_sale' ? 'sold' : 'active'
+                    status: 'sold',
+                    settlementType: 'sell_with_finance',
+                    settlementAmount: new Prisma.Decimal(dpAmount),
+                    lossAmount,
+                    settledAt: new Date(),
+                    settledBy: buyerName || 'Buyer',
+                    buyerName,
+                    buyerPhone,
+                    buyerCustomerId: buyerCustomer.id
                 }
             });
-        }
 
-        // 4. Close the old loan
-        await tx.loan.update({
-            where: { id: seizure.loanId, orgId },
-            data: {
-                status: 'closed',
-                outstandingPrincipal: 0
-            }
+            return { seizure: updatedSeizure, vehicleSale, buyerCustomer };
         });
 
-        // Mark all unpaid dues on the old loan as paid
-        await tx.loanDue.updateMany({
-            where: { loanId: seizure.loanId, orgId, status: { not: 'paid' } },
-            data: { status: 'paid' }
+        await logAudit({
+            orgId, userId,
+            action: 'vehicle_seizure_settled',
+            entityType: 'vehicle_seizure',
+            entityId: seizureId,
+            details: { settlementType: 'sell_with_finance', downPayment: dpAmount, buyerName, lossAmount: Number(result.seizure.lossAmount) }
         });
 
-        // 5. Update the VehicleSeizure status
-        const updatedSeizure = await tx.vehicleSeizure.update({
-            where: { id: seizureId, orgId },
-            data: {
-                status: settlementType === 'redemption' ? 'settled' : 'sold',
-                settlementType,
-                settlementAmount: new Prisma.Decimal(settlementAmount || 0),
-                lossAmount,
-                settledAt: new Date(),
-                settledBy: settlementType === 'redemption' ? 'Original Customer' : (buyerName || 'Buyer')
-            }
-        });
-
-        return { seizure: updatedSeizure, buyerCustomer, originalLoanId: seizure.loanId };
-    });
-
-    // 6. Record recovery payment under old loan using core recordPayment service (if amount > 0)
-    if (settlementAmount > 0) {
-        try {
-            const paymentService = require('./payment.service');
-            await paymentService.recordPayment({
-                orgId,
-                loanId: result.originalLoanId,
-                amount: settlementAmount,
-                paymentMethod: 'cash',
-                referenceNumber: `Settlement: ${settlementType.toUpperCase()} - ${settlementType === 'redemption' ? 'Redemption' : (buyerName || 'Buyer')}`,
-                createdBy: userId
-            });
-        } catch (paymentErr) {
-            console.error('Failed to log settlement recovery payment transaction:', paymentErr);
-        }
+        return result;
     }
 
-    // 7. Log Audit
-    await logAudit({
-        orgId,
-        userId,
-        action: 'vehicle_seizure_settled',
-        entityType: 'vehicle_seizure',
-        entityId: seizureId,
-        details: { settlementType, settlementAmount, lossAmount: Number(result.seizure.lossAmount), buyerName }
-    });
+    throw new Error(`Invalid settlement type: ${settlementType}. Must be 'reclaim', 'sell', or 'sell_with_finance'.`);
+}
 
-    return { seizure: result.seizure, buyerCustomer: result.buyerCustomer };
+/**
+ * Get all vehicle sales for an organization (for the Transactions page).
+ */
+async function getVehicleSales(orgId) {
+    return prisma.vehicleSale.findMany({
+        where: { orgId },
+        include: {
+            vehicle: { select: { id: true, vehicleNumber: true, model: true } },
+            loan: { select: { id: true, principalAmount: true } },
+            seizure: { select: { id: true, seizureDate: true } },
+            creator: { select: { id: true, name: true } }
+        },
+        orderBy: { saleDate: 'desc' }
+    });
 }
 
 module.exports = {
     seizeVehicle,
     getSeizedInventory,
-    updateSeizureValuation,
-    resellVehicle,
-    settleSeizure
+    settleSeizure,
+    getVehicleSales
 };

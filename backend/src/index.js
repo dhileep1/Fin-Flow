@@ -21,7 +21,7 @@ app.use(express.urlencoded({ extended: true }));
 // Rate limiting configurations
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // Limit each IP to 100 requests per window
+    max: config.nodeEnv === 'development' ? 10000 : 100, // Limit each IP to 100 requests per window
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests from this IP, please try again after 15 minutes.' }
@@ -29,7 +29,7 @@ const globalLimiter = rateLimit({
 
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 10, // Limit each IP to 10 login attempts per window
+    max: config.nodeEnv === 'development' ? 1000 : 10, // Limit each IP to 10 login attempts per window
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many login attempts from this IP, please try again after 15 minutes.' }
@@ -151,3 +151,4 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 module.exports = app;
+

@@ -93,4 +93,45 @@ async function updateVehicle(req, res, next) {
     }
 }
 
-module.exports = { listVehicles, createVehicle, updateVehicle };
+async function getVehicleById(req, res, next) {
+    try {
+        const vehicle = await prisma.vehicle.findFirst({
+            where: { id: req.params.id, orgId: req.orgId },
+            include: {
+                customer: { select: { id: true, name: true, phone: true, address: true } },
+                loans: {
+                    orderBy: { createdAt: 'desc' },
+                    include: {
+                        customer: { select: { id: true, name: true, phone: true } },
+                        payments: { select: { amount: true } }
+                    }
+                },
+                seizures: {
+                    orderBy: { createdAt: 'desc' },
+                    include: {
+                        user: { select: { name: true } }
+                    }
+                },
+                vehicleSales: {
+                    orderBy: { createdAt: 'desc' }
+                },
+                expenses: {
+                    orderBy: { expenseDate: 'desc' },
+                    include: {
+                        creator: { select: { name: true } }
+                    }
+                }
+            }
+        });
+
+        if (!vehicle) {
+            return res.status(404).json({ error: 'Vehicle not found' });
+        }
+
+        res.json(vehicle);
+    } catch (err) {
+        next(err);
+    }
+}
+
+module.exports = { listVehicles, createVehicle, updateVehicle, getVehicleById };

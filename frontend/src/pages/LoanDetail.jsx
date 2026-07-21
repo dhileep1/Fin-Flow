@@ -20,7 +20,8 @@ import {
     RefreshCcw,
     ArrowDownCircle,
     ArrowUpRight,
-    CalendarCheck
+    CalendarCheck,
+    CheckCircle
 } from 'lucide-react';
 import '../styles/loanDetail.css';
 
@@ -33,6 +34,11 @@ export default function LoanDetail() {
     const [showCallLog, setShowCallLog] = useState(false);
     const [showSeize, setShowSeize] = useState(false);
     const [showForeclosure, setShowForeclosure] = useState(false);
+    const [showReclaim, setShowReclaim] = useState(false);
+    const [reclaimAmount, setReclaimAmount] = useState('');
+    const [reclaimMethod, setReclaimMethod] = useState('cash');
+    const [submittingReclaim, setSubmittingReclaim] = useState(false);
+    const [reclaimError, setReclaimError] = useState('');
     const [activeTab, setActiveTab] = useState('schedule');
     const [expandFuture, setExpandFuture] = useState(false);
 
@@ -45,10 +51,59 @@ export default function LoanDetail() {
         try {
             const data = await api.getLoan(id);
             setLoan(data);
+            
+            // Calculate overdue dues to default the reclaim amount
+            const sorted = [...(data.loanDues || [])].sort((a, b) => a.dueSequence - b.dueSequence);
+            const overdue = sorted.reduce((sum, d) => {
+                const dueDate = new Date(d.dueDate);
+                dueDate.setHours(0, 0, 0, 0);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const isMissed = d.status === 'overdue' || (d.status === 'pending' && dueDate < today);
+                return isMissed ? sum + (Number(d.totalDue) - Number(d.amountPaid || 0)) : sum;
+            }, 0);
+            setReclaimAmount(overdue.toString());
         } catch (err) {
             console.error('Failed to load loan:', err);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleReclaimSubmit = async (e) => {
+        if (e) e.preventDefault();
+        const activeSeizure = loan.vehicle?.seizures?.find(s => s.status === 'in_yard') || loan.vehicle?.seizures?.[0];
+        if (!activeSeizure) {
+            setReclaimError('No active seizure record found for this vehicle.');
+            return;
+        }
+
+        setSubmittingReclaim(true);
+        setReclaimError('');
+        try {
+            await api.settleSeizure(activeSeizure.id, {
+                settlementType: 'reclaim',
+                settlementAmount: Number(reclaimAmount || 0),
+                paymentMethod: reclaimMethod
+            });
+            setShowReclaim(false);
+            await loadLoan();
+        } catch (err) {
+            setReclaimError(err.message || 'Failed to submit reclaim');
+        } finally {
+            setSubmittingReclaim(false);
+        }
+    };
+
+    const handleCloseLoan = async () => {
+        if (!window.confirm('Are you sure you want to close this loan? This will mark the loan status as closed.')) {
+            return;
+        }
+        try {
+            await api.closeLoan(id);
+            await loadLoan();
+        } catch (err) {
+            alert(err.message || 'Failed to close loan');
         }
     };
 
@@ -160,17 +215,39 @@ export default function LoanDetail() {
                         </div>
                         {(loan.status.toLowerCase() === 'active' || loan.status.toLowerCase() === 'overdue' || loan.status.toLowerCase() === 'pending') && (
                             <div className="flex items-center gap-2 ml-2">
+                                {loan.loanDues && loan.loanDues.length > 0 && loan.loanDues.every(d => d.status === 'paid') ? (
+                                    <button
+                                        className="btn-action-foreclose"
+                                        style={{ backgroundColor: '#166534', borderColor: '#166534', color: '#ffffff' }}
+                                        onClick={handleCloseLoan}
+                                    >
+                                        <CheckCircle size={12} /> Close Loan
+                                    </button>
+                                ) : (
+                                    <>
+                                        <button
+                                            className="btn-action-seize"
+                                            onClick={() => setShowSeize(true)}
+                                        >
+                                            <AlertTriangle size={12} /> Seize Vehicle
+                                        </button>
+                                        <button
+                                            className="btn-action-foreclose"
+                                            onClick={() => setShowForeclosure(true)}
+                                        >
+                                            <ShieldCheck size={12} /> Foreclose Loan
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        )}
+                        {loan.status.toLowerCase() === 'seized' && (
+                            <div className="flex items-center gap-2 ml-2">
                                 <button
-                                    className="btn-action-seize"
-                                    onClick={() => setShowSeize(true)}
+                                    className="btn-action-reclaim"
+                                    onClick={() => setShowReclaim(true)}
                                 >
-                                    <AlertTriangle size={12} /> Seize Vehicle
-                                </button>
-                                <button
-                                    className="btn-action-foreclose"
-                                    onClick={() => setShowForeclosure(true)}
-                                >
-                                    <ShieldCheck size={12} /> Foreclose Loan
+                                    <RefreshCcw size={12} /> Reclaim Vehicle
                                 </button>
                             </div>
                         )}
@@ -588,6 +665,80 @@ export default function LoanDetail() {
                         loadLoan();
                     }}
                 />
+            )}
+
+            {showReclaim && (
+                <div className="modal-overlay" onClick={() => setShowReclaim(false)}>
+                    <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '440px' }}>
+                        <div className="modal-header">
+                            <h2><RefreshCcw size={18} /> Reclaim Vehicle</h2>
+                            <button className="btn btn-ghost" onClick={() => setShowReclaim(false)}>✕</button>
+                        </div>
+                        <form onSubmit={handleReclaimSubmit}>
+                            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+                                {reclaimError && <div className="login-error">{reclaimError}</div>}
+
+                                <div className="card-glass" style={{ padding: 'var(--space-4)', borderLeft: '4px solid var(--color-warning)', background: 'linear-gradient(to right, var(--slate-50), #ffffff)' }}>
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <div className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1">Overdue Dues</div>
+                                            <div style={{ fontWeight: 700, color: 'var(--color-danger)', fontSize: '18px' }}>
+                                                ₹{Number(totalOverdue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                            </div>
+                                        </div>
+                                        <div style={{ textAlign: 'right' }}>
+                                            <div className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1">Total Outstanding</div>
+                                            <div style={{ fontWeight: 800, color: 'var(--color-warning)', fontSize: '18px' }}>
+                                                ₹{Number(sortedDues.reduce((sum, d) => d.status === 'paid' ? sum : sum + (Number(d.totalDue) - Number(d.amountPaid || 0)), 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="form-group">
+                                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 600 }}>Payment Amount (₹) *</label>
+                                    <div className="input-with-icon">
+                                        <div className="input-icon"><CreditCard size={16} /></div>
+                                        <input
+                                            type="number"
+                                            className="form-input"
+                                            placeholder="Enter Payment Amount"
+                                            value={reclaimAmount}
+                                            onChange={(e) => setReclaimAmount(e.target.value)}
+                                            required
+                                        />
+                                    </div>
+                                    <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                                        Partial payments are supported.
+                                    </span>
+                                </div>
+
+                                <div className="form-group">
+                                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 600 }}>Payment Method</label>
+                                    <select
+                                        className="form-input"
+                                        value={reclaimMethod}
+                                        onChange={(e) => setReclaimMethod(e.target.value)}
+                                        style={{ height: '42px' }}
+                                    >
+                                        <option value="cash">Cash</option>
+                                        <option value="upi">UPI</option>
+                                        <option value="bank">Bank Transfer</option>
+                                        <option value="cheque">Cheque</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="modal-footer" style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                                <button type="button" className="btn btn-ghost" onClick={() => setShowReclaim(false)} style={{ flex: 1 }}>
+                                    Cancel
+                                </button>
+                                <button type="submit" className="btn btn-primary" disabled={submittingReclaim} style={{ flex: 1, backgroundColor: '#2563eb', borderColor: '#2563eb' }}>
+                                    {submittingReclaim ? 'Saving...' : 'Confirm Reclaim'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
             )}
         </div>
     );

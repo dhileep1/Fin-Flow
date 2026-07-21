@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
-import { Search, Bike, MapPin, ChevronLeft, ChevronRight, Activity, Warehouse, CheckCircle, ShieldAlert, BadgeAlert, ArrowUpRight, User, Phone, DollarSign, Calendar, X, AlertTriangle } from 'lucide-react';
+import { Search, Bike, MapPin, ChevronLeft, ChevronRight, Activity, Warehouse, CheckCircle, ShieldAlert, BadgeAlert, ArrowUpRight, User, Phone, DollarSign, Calendar, X, AlertTriangle, Check, RotateCcw, ShoppingBag, Landmark } from 'lucide-react';
 import SeizureModal from '../components/SeizureModal';
 
 const formatCurrency = (amount) =>
@@ -20,19 +20,11 @@ export default function VehicleInventory() {
     const [showSeizureModal, setShowSeizureModal] = useState(false);
     const navigate = useNavigate();
 
-    // Valuation update states
-    const [showValuationModal, setShowValuationModal] = useState(false);
-    const [selectedSeizure, setSelectedSeizure] = useState(null);
-    const [newValuation, setNewValuation] = useState('');
-    const [confirmUpdate, setConfirmUpdate] = useState(false);
-    const [updatingValuation, setUpdatingValuation] = useState(false);
-    const [valuationError, setValuationError] = useState('');
-
     // Detailed action card and settlement modal states
     const [selectedVehicle, setSelectedVehicle] = useState(null);
     const [showActionModal, setShowActionModal] = useState(false);
     const [showResaleModal, setShowResaleModal] = useState(false);
-    const [settlementType, setSettlementType] = useState('redemption'); // 'redemption', 'cash_sale', 'financed_sale'
+    const [settlementType, setSettlementType] = useState('reclaim'); // 'reclaim', 'sell', 'sell_with_finance'
     const [buyerName, setBuyerName] = useState('');
     const [buyerPhone, setBuyerPhone] = useState('');
     const [buyerAddress, setBuyerAddress] = useState('');
@@ -40,8 +32,36 @@ export default function VehicleInventory() {
     const [paymentMethod, setPaymentMethod] = useState('cash');
     const [loanDetails, setLoanDetails] = useState(null);
     const [outstandingBalance, setOutstandingBalance] = useState(0);
+    const [overdueBalance, setOverdueBalance] = useState(0);
     const [submittingSettlement, setSubmittingSettlement] = useState(false);
     const [settlementError, setSettlementError] = useState('');
+    const [totalPaymentsCollected, setTotalPaymentsCollected] = useState(0);
+    const [principalDisbursed, setPrincipalDisbursed] = useState(0);
+
+    // Customer search / create states (for Sell with Finance)
+    const [customerQuery, setCustomerQuery] = useState('');
+    const [customerResults, setCustomerResults] = useState([]);
+    const [customersLoading, setCustomersLoading] = useState(false);
+    const [selectedCustomerForFinance, setSelectedCustomerForFinance] = useState(null);
+    const [isCreatingNewCustomer, setIsCreatingNewCustomer] = useState(false);
+    const [newCustomerDetails, setNewCustomerDetails] = useState({
+        name: '',
+        phone: '',
+        address: '',
+        aadharNumber: '',
+    });
+
+    // Loan details (for Sell with Finance)
+    const [resalePrice, setResalePrice] = useState('');
+    const [loanTenure, setLoanTenure] = useState('12');
+    const [loanInterestRate, setLoanInterestRate] = useState('2');
+    const [loanStartDate, setLoanStartDate] = useState(() => new Date().toISOString().slice(0, 10));
+
+    // Guarantor (Jamin) details (for Sell with Finance)
+    const [guarantorName, setGuarantorName] = useState('');
+    const [guarantorPhone, setGuarantorPhone] = useState('');
+    const [guarantorAadhar, setGuarantorAadhar] = useState('');
+    const [guarantorAddress, setGuarantorAddress] = useState('');
 
     useEffect(() => {
         loadVehicles();
@@ -59,25 +79,71 @@ export default function VehicleInventory() {
         }
     };
 
-    const fetchLoanDetails = async (loanId) => {
+    const fetchLoanDetails = async (loanId, currentSettlementType) => {
         try {
             setOutstandingBalance(0);
+            setOverdueBalance(0);
             setSettlementAmount('');
             const data = await api.getLoan(loanId);
             setLoanDetails(data);
             const unpaid = data.loanDues?.filter(d => d.status !== 'paid') || [];
             const total = unpaid.reduce((sum, d) => sum + Number(d.totalDue) - Number(d.amountPaid), 0);
             setOutstandingBalance(total);
-            setSettlementAmount(total.toString());
+
+            // Calculate overdue dues
+            let overdue = 0;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            data.loanDues?.forEach(d => {
+                const dueDate = new Date(d.dueDate);
+                dueDate.setHours(0, 0, 0, 0);
+                const isMissed = d.status === 'overdue' || (d.status === 'pending' && dueDate < today);
+                if (isMissed && d.status !== 'paid') {
+                    overdue += (Number(d.totalDue) - Number(d.amountPaid || 0));
+                }
+            });
+            setOverdueBalance(overdue);
+
+            if (currentSettlementType === 'reclaim') {
+                setSettlementAmount(overdue.toString());
+            } else {
+                setSettlementAmount('');
+            }
+            
+            const collected = data.payments?.reduce((sum, p) => sum + Number(p.amount), 0) || 0;
+            setTotalPaymentsCollected(collected);
+            setPrincipalDisbursed(Number(data.disbursedAmount || data.principalAmount || 0));
         } catch (err) {
             console.error('Failed to load loan details for settlement', err);
+        }
+    };
+
+    const loadCustomers = async (q) => {
+        if (!q || q.length < 2) {
+            setCustomerResults([]);
+            return;
+        }
+        setCustomersLoading(true);
+        try {
+            const data = await api.getCustomers(`q=${encodeURIComponent(q)}`);
+            setCustomerResults(data.customers || []);
+        } catch (e) {
+            console.error('Failed to search customers', e);
+        } finally {
+            setCustomersLoading(false);
+        }
+    };
+
+    const handleCustomerSearchChange = (value) => {
+        setCustomerQuery(value);
+        if (value.length >= 2 || value.length === 0) {
+            loadCustomers(value);
         }
     };
 
     // Calculate metrics based on total list before filtering
     const totalVehicles = vehicles.length;
     const seizedCount = vehicles.filter(v => v.status === 'seized').length;
-    const readyForSaleCount = vehicles.filter(v => v.status === 'seized' && v.seizures?.[0]?.valuationAmount && Number(v.seizures[0].valuationAmount) > 0).length;
     const soldCount = vehicles.filter(v => v.status === 'sold').length;
 
     // Filter logic
@@ -87,8 +153,6 @@ export default function VehicleInventory() {
         let matchesStatus = true;
         if (statusFilter === 'seized') {
             matchesStatus = v.status === 'seized';
-        } else if (statusFilter === 'ready_for_sale') {
-            matchesStatus = v.status === 'seized' && latestSeizure.valuationAmount && Number(latestSeizure.valuationAmount) > 0;
         } else if (statusFilter === 'sold') {
             matchesStatus = v.status === 'sold';
         }
@@ -177,7 +241,7 @@ export default function VehicleInventory() {
                 }
                 .sleek-pill-btn.active {
                     background: #ffffff;
-                    color: var(--color-primary);
+                    color: var(--brand-accent);
                     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
                 }
                 .vehicle-table th {
@@ -197,7 +261,7 @@ export default function VehicleInventory() {
             </div>
 
             {/* Compact Horizontal KPI Summary Cards */}
-            <div className="kpi-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+            <div className="kpi-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
                 <div className="kpi-card vehicles-kpi-card">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                         <div className="kpi-icon-wrapper" style={{ background: '#f1f5f9', color: '#475569' }}>
@@ -215,15 +279,6 @@ export default function VehicleInventory() {
                         <span style={{ fontSize: '16px', fontWeight: 800, color: '#ea580c' }}>{seizedCount}</span>
                     </div>
                     <span style={{ color: 'var(--slate-400)', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Seized</span>
-                </div>
-                <div className="kpi-card vehicles-kpi-card">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div className="kpi-icon-wrapper" style={{ background: '#fff1f2', color: '#e11d48' }}>
-                            <BadgeAlert size={14} />
-                        </div>
-                        <span style={{ fontSize: '16px', fontWeight: 800, color: '#e11d48' }}>{readyForSaleCount}</span>
-                    </div>
-                    <span style={{ color: 'var(--slate-400)', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Ready For Sale</span>
                 </div>
                 <div className="kpi-card vehicles-kpi-card">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -261,12 +316,6 @@ export default function VehicleInventory() {
                         onClick={() => { setStatusFilter('seized'); setPage(1); }}
                     >
                         Seized
-                    </button>
-                    <button 
-                        className={`sleek-pill-btn ${statusFilter === 'ready_for_sale' ? 'active' : ''}`}
-                        onClick={() => { setStatusFilter('ready_for_sale'); setPage(1); }}
-                    >
-                        Ready for Sale
                     </button>
                     <button 
                         className={`sleek-pill-btn ${statusFilter === 'sold' ? 'active' : ''}`}
@@ -347,7 +396,7 @@ export default function VehicleInventory() {
                                         <td className="text-left">
                                             {hasActiveLoan ? (
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                                                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-primary)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--brand-accent)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                                                         Active Loan <ArrowUpRight size={10} />
                                                     </span>
                                                     <span style={{ fontSize: '11px', color: 'var(--slate-500)' }}>
@@ -368,47 +417,9 @@ export default function VehicleInventory() {
                                             )}
                                         </td>
 
-                                        {/* 4. STATUS / VALUATION */}
+                                        {/* 4. STATUS */}
                                         <td className="text-center">
-                                            <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                                                {getStatusBadge(v.status)}
-                                                
-                                                {(v.status === 'seized' || v.status === 'sold') && (
-                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: '3px' }}>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
-                                                            <span style={{ fontSize: '10px', color: 'var(--slate-900)', fontWeight: 700 }}>
-                                                                {latestSeizure.valuationAmount ? `Value: ${formatCurrency(latestSeizure.valuationAmount)}` : 'No Valuation'}
-                                                            </span>
-                                                            <button
-                                                                title="Update Valuation"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setSelectedSeizure(latestSeizure);
-                                                                    setNewValuation(latestSeizure.valuationAmount || '');
-                                                                    setShowValuationModal(true);
-                                                                }}
-                                                                style={{
-                                                                    background: 'none',
-                                                                    border: 'none',
-                                                                    cursor: 'pointer',
-                                                                    padding: '2px',
-                                                                    color: 'var(--slate-400)',
-                                                                    display: 'inline-flex',
-                                                                    alignItems: 'center',
-                                                                    justifyContent: 'center',
-                                                                    borderRadius: '4px',
-                                                                    transition: 'all 0.2s'
-                                                                }}
-                                                                onMouseOver={(e) => e.currentTarget.style.color = 'var(--color-primary)'}
-                                                                onMouseOut={(e) => e.currentTarget.style.color = 'var(--slate-400)'}
-                                                            >
-                                                                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                                                            </button>
-                                                        </div>
-                                                        {/* Yard location display removed */}
-                                                    </div>
-                                                )}
-                                            </div>
+                                            {getStatusBadge(v.status)}
                                         </td>
                                     </tr>
                                 );
@@ -450,120 +461,7 @@ export default function VehicleInventory() {
                     </div>
                 )}
             </div>
-            {/* Update Valuation Modal */}
-            {showValuationModal && selectedSeizure && (
-                <div 
-                    style={{
-                        position: 'fixed',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        backgroundColor: 'rgba(15, 23, 42, 0.6)',
-                        backdropFilter: 'blur(4px)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        zIndex: 999,
-                        animation: 'fadeIn 0.2s ease-out'
-                    }}
-                    onClick={() => {
-                        if (!updatingValuation) {
-                            setShowValuationModal(false);
-                            setConfirmUpdate(false);
-                            setValuationError('');
-                        }
-                    }}
-                >
-                    <div 
-                        style={{
-                            background: '#ffffff',
-                            width: '100%',
-                            maxWidth: '400px',
-                            borderRadius: '16px',
-                            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-                            padding: '24px',
-                            position: 'relative'
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <h3 style={{ fontWeight: 700, fontSize: '18px', color: '#1e293b', marginBottom: '8px' }}>Update Valuation</h3>
-                        <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
-                            Update the valuation amount for the seized vehicle.
-                        </p>
 
-                        {valuationError && (
-                            <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.1)', color: 'rgb(239, 68, 68)', borderRadius: '8px', fontSize: '13px', marginBottom: '16px', fontWeight: 500 }}>
-                                {valuationError}
-                            </div>
-                        )}
-
-                        <div className="form-group" style={{ marginBottom: '16px' }}>
-                            <label className="form-label" style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>Valuation Amount (₹)</label>
-                            <input 
-                                type="number" 
-                                className="form-input"
-                                placeholder="Enter valuation amount (optional)"
-                                value={newValuation}
-                                onChange={(e) => setNewValuation(e.target.value)}
-                                style={{ borderRadius: '8px', width: '100%' }}
-                            />
-                        </div>
-
-                        {/* Confirmation Checkbox */}
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
-                            <input 
-                                type="checkbox" 
-                                id="confirmValuationCheck"
-                                checked={confirmUpdate}
-                                onChange={(e) => setConfirmUpdate(e.target.checked)}
-                                style={{ marginTop: '3px', cursor: 'pointer' }}
-                            />
-                            <label htmlFor="confirmValuationCheck" style={{ fontSize: '12px', color: '#475569', fontWeight: 500, cursor: 'pointer', userSelect: 'none' }}>
-                                I confirm that I want to update the valuation to {newValuation ? `₹${Number(newValuation).toLocaleString('en-IN')}` : 'empty/none'}.
-                            </label>
-                        </div>
-
-                        <div style={{ display: 'flex', gap: '12px' }}>
-                            <button 
-                                type="button"
-                                className="btn btn-secondary"
-                                onClick={() => {
-                                    setShowValuationModal(false);
-                                    setConfirmUpdate(false);
-                                    setValuationError('');
-                                }}
-                                disabled={updatingValuation}
-                                style={{ flex: 1, borderRadius: '10px' }}
-                            >
-                                Cancel
-                            </button>
-                            <button 
-                                type="button"
-                                className="btn btn-primary"
-                                disabled={!confirmUpdate || updatingValuation}
-                                onClick={async () => {
-                                    setUpdatingValuation(true);
-                                    setValuationError('');
-                                    try {
-                                        await api.updateSeizureValuation(selectedSeizure.id, newValuation ? Number(newValuation) : null);
-                                        setShowValuationModal(false);
-                                        setConfirmUpdate(false);
-                                        loadVehicles(); // Reload the list
-                                    } catch (err) {
-                                        setValuationError(err.message || 'Failed to update valuation');
-                                    } finally {
-                                        setUpdatingValuation(false);
-                                    }
-                                }}
-                                style={{ flex: 1, borderRadius: '10px' }}
-                            >
-                                {updatingValuation ? 'Saving...' : 'Confirm'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* Vehicle Action Card Modal */}
             {showActionModal && selectedVehicle && (
@@ -611,7 +509,7 @@ export default function VehicleInventory() {
                                 <h3 style={{ fontWeight: 800, fontSize: '18px', color: '#1e293b', margin: 0 }}>{selectedVehicle.vehicleNumber}</h3>
                                 <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>{selectedVehicle.model || 'Unknown Model'}</p>
                             </div>
-                            <div style={{ marginLeft: 'auto' }}>
+                            <div style={{ marginLeft: 'auto', marginRight: '24px' }}>
                                 {getStatusBadge(selectedVehicle.status)}
                             </div>
                         </div>
@@ -630,7 +528,7 @@ export default function VehicleInventory() {
                             </div>
                         </div>
 
-                        {/* Seizure & Valuation details */}
+                        {/* Seizure details */}
                         {(selectedVehicle.status === 'seized' || selectedVehicle.status === 'sold') && (
                             <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
                                 <h4 style={{ fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>Seizure Log Details</h4>
@@ -640,12 +538,6 @@ export default function VehicleInventory() {
                                         <span style={{ fontWeight: 600, color: '#1e293b' }}>{formatDate(selectedVehicle.seizures?.[0]?.seizureDate)}</span>
                                     </div>
                                     <div>
-                                        <span style={{ display: 'block', color: '#64748b', fontSize: '10px', textTransform: 'uppercase', fontWeight: 600 }}>Current Valuation</span>
-                                        <span style={{ fontWeight: 700, color: '#0f766e' }}>
-                                            {selectedVehicle.seizures?.[0]?.valuationAmount ? formatCurrency(selectedVehicle.seizures[0].valuationAmount) : 'Pending Valuation'}
-                                        </span>
-                                    </div>
-                                    <div style={{ gridColumn: 'span 2' }}>
                                         <span style={{ display: 'block', color: '#64748b', fontSize: '10px', textTransform: 'uppercase', fontWeight: 600 }}>Yard Location</span>
                                         <span style={{ fontWeight: 600, color: '#1e293b' }}>{selectedVehicle.seizures?.[0]?.yardLocation || 'Not Specified'}</span>
                                     </div>
@@ -655,42 +547,83 @@ export default function VehicleInventory() {
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             {selectedVehicle.status === 'seized' && (
-                                <>
+                                <div style={{ display: 'flex', flexDirection: 'row', gap: '8px', width: '100%' }}>
                                     <button 
                                         type="button"
-                                        className="btn btn-primary"
-                                        style={{ width: '100%', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                                        className="btn btn-subtle-reclaim"
+                                        style={{ flex: 1, borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px 4px', fontSize: '11px', fontWeight: 700 }}
                                         onClick={() => {
                                             const loanId = selectedVehicle.seizures?.[0]?.loanId || selectedVehicle.loans?.[0]?.id;
                                             if (loanId) {
-                                                fetchLoanDetails(loanId);
+                                                fetchLoanDetails(loanId, 'reclaim');
+                                            }
+                                            setShowActionModal(false);
+                                            setSettlementType('reclaim');
+                                            setSettlementError('');
+                                            setShowResaleModal(true);
+                                        }}
+                                    >
+                                        <RotateCcw size={12} />
+                                        Reclaim
+                                    </button>
+
+                                    <button 
+                                        type="button"
+                                        className="btn btn-subtle-sell"
+                                        style={{ flex: 1, borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px 4px', fontSize: '11px', fontWeight: 700 }}
+                                        onClick={() => {
+                                            const loanId = selectedVehicle.seizures?.[0]?.loanId || selectedVehicle.loans?.[0]?.id;
+                                            if (loanId) {
+                                                fetchLoanDetails(loanId, 'sell');
                                             }
                                             setShowActionModal(false);
                                             setBuyerName('');
                                             setBuyerPhone('');
                                             setBuyerAddress('');
-                                            setSettlementType('redemption');
+                                            setSettlementType('sell');
+                                            setSettlementAmount('');
                                             setSettlementError('');
                                             setShowResaleModal(true);
                                         }}
                                     >
-                                        <DollarSign size={16} />
-                                        Settle & Resell
+                                        <ShoppingBag size={12} />
+                                        Sell
                                     </button>
 
                                     <button 
                                         type="button"
-                                        className="btn btn-secondary"
-                                        style={{ width: '100%', borderRadius: '10px' }}
+                                        className="btn btn-subtle-sell-finance"
+                                        style={{ flex: 1, borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px 4px', fontSize: '11px', fontWeight: 700 }}
                                         onClick={() => {
-                                            setSelectedSeizure(selectedVehicle.seizures?.[0]);
-                                            setNewValuation(selectedVehicle.seizures?.[0]?.valuationAmount || '');
-                                            setShowValuationModal(true);
+                                            const loanId = selectedVehicle.seizures?.[0]?.loanId || selectedVehicle.loans?.[0]?.id;
+                                            if (loanId) {
+                                                fetchLoanDetails(loanId, 'sell_with_finance');
+                                            }
+                                            setShowActionModal(false);
+                                            setBuyerName('');
+                                            setBuyerPhone('');
+                                            setBuyerAddress('');
+                                            setSettlementType('sell_with_finance');
+                                            setSettlementAmount('');
+                                            setSettlementError('');
+                                            setSelectedCustomerForFinance(null);
+                                            setCustomerQuery('');
+                                            setIsCreatingNewCustomer(false);
+                                            setNewCustomerDetails({ name: '', phone: '', address: '', aadharNumber: '' });
+                                            setResalePrice('');
+                                            setLoanTenure('12');
+                                            setLoanInterestRate('2');
+                                            setGuarantorName('');
+                                            setGuarantorPhone('');
+                                            setGuarantorAadhar('');
+                                            setGuarantorAddress('');
+                                            setShowResaleModal(true);
                                         }}
                                     >
-                                        Update Valuation Amount
+                                        <Landmark size={12} />
+                                        Sell with Fin
                                     </button>
-                                </>
+                                </div>
                             )}
 
                             {selectedVehicle.status === 'active' && (selectedVehicle.loans?.[0]?.id || selectedVehicle.seizures?.[0]?.loanId) && (
@@ -708,7 +641,7 @@ export default function VehicleInventory() {
                                 </button>
                             )}
 
-                            {(selectedVehicle.seizures?.[0]?.loanId || selectedVehicle.loans?.[0]?.id) && (
+                            {selectedVehicle.status !== 'seized' && (selectedVehicle.seizures?.[0]?.loanId || selectedVehicle.loans?.[0]?.id) && (
                                 <button 
                                     type="button"
                                     className="btn btn-secondary"
@@ -725,11 +658,16 @@ export default function VehicleInventory() {
                             <button 
                                 type="button"
                                 className="btn btn-secondary"
-                                style={{ width: '100%', borderRadius: '10px', background: '#f1f5f9', border: 'none', color: '#475569' }}
-                                onClick={() => setShowActionModal(false)}
+                                style={{ width: '100%', borderRadius: '10px', marginTop: '4px', background: '#f8fafc', borderColor: '#cbd5e1', color: '#334155' }}
+                                onClick={() => {
+                                    setShowActionModal(false);
+                                    navigate(`/vehicles/${selectedVehicle.id}`);
+                                }}
                             >
-                                Close
+                                View History & Expenses
                             </button>
+
+
                         </div>
                     </div>
                 </div>
@@ -761,218 +699,582 @@ export default function VehicleInventory() {
                     <div 
                         style={{
                             background: '#ffffff',
-                            width: '100%',
-                            maxWidth: '480px',
+                            width: '95%',
+                            maxWidth: settlementType === 'sell_with_finance' ? '920px' : (settlementType === 'sell' ? '760px' : '440px'),
+                            maxHeight: '90vh',
                             borderRadius: '16px',
                             boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-                            padding: '24px',
-                            position: 'relative'
+                            position: 'relative',
+                            display: 'flex',
+                            transition: 'all 0.2s ease-out',
+                            overflow: 'hidden'
                         }}
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <button 
-                            onClick={() => setShowResaleModal(false)}
-                            style={{ position: 'absolute', top: '16px', right: '16px', border: 'none', background: 'none', cursor: 'pointer', color: '#64748b' }}
-                            disabled={submittingSettlement}
+                        {/* LEFT COLUMN: Light Slate Info Panel */}
+                        <div 
+                            style={{
+                                background: '#f8fafc',
+                                color: '#1e293b',
+                                width: '38%',
+                                minWidth: '280px',
+                                padding: '24px 20px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'space-between',
+                                borderRight: '1px solid #cbd5e1',
+                                overflowY: 'auto',
+                                maxHeight: '90vh'
+                            }}
                         >
-                            <X size={20} />
-                        </button>
-
-                        <h3 style={{ fontWeight: 800, fontSize: '18px', color: '#1e293b', marginBottom: '4px' }}>Asset Settlement & Resale</h3>
-                        <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
-                            Configure resolution for vehicle: <strong>{selectedVehicle.vehicleNumber}</strong>
-                        </p>
-
-                        {/* Tabs: Owner Redemption vs Sell to New Buyer */}
-                        <div style={{ display: 'flex', background: '#f1f5f9', padding: '3px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
-                            <button
-                                type="button"
-                                style={{
-                                    flex: 1,
-                                    padding: '8px',
-                                    fontSize: '13px',
-                                    fontWeight: 600,
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    background: settlementType === 'redemption' ? '#ffffff' : 'transparent',
-                                    color: settlementType === 'redemption' ? 'var(--color-primary)' : 'var(--slate-500)',
-                                    boxShadow: settlementType === 'redemption' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s'
-                                }}
-                                onClick={() => setSettlementType('redemption')}
-                            >
-                                Owner Redemption
-                            </button>
-                            <button
-                                type="button"
-                                style={{
-                                    flex: 1,
-                                    padding: '8px',
-                                    fontSize: '13px',
-                                    fontWeight: 600,
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    background: (settlementType === 'cash_sale' || settlementType === 'financed_sale') ? '#ffffff' : 'transparent',
-                                    color: (settlementType === 'cash_sale' || settlementType === 'financed_sale') ? 'var(--color-primary)' : 'var(--slate-500)',
-                                    boxShadow: (settlementType === 'cash_sale' || settlementType === 'financed_sale') ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s'
-                                }}
-                                onClick={() => setSettlementType('cash_sale')}
-                            >
-                                Sell to New Buyer
-                            </button>
-                        </div>
-
-                        {settlementError && (
-                            <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.1)', color: 'rgb(239, 68, 68)', borderRadius: '8px', fontSize: '13px', marginBottom: '16px', fontWeight: 500 }}>
-                                {settlementError}
-                            </div>
-                        )}
-
-                        <div style={{ background: '#f8fafc', padding: '12px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '16px', fontSize: '13px' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                <span style={{ color: '#64748b' }}>Original Customer:</span>
-                                <span style={{ fontWeight: 600, color: '#334155' }}>{selectedVehicle.customer?.name}</span>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                <span style={{ color: '#64748b' }}>Total Dues Outstanding:</span>
-                                <span style={{ fontWeight: 700, color: '#e11d48' }}>{formatCurrency(outstandingBalance)}</span>
-                            </div>
-                        </div>
-
-                        {settlementType !== 'redemption' && (
-                            <div style={{ borderTop: '1px dashed #e2e8f0', paddingTop: '12px', marginBottom: '12px' }}>
-                                <div style={{ display: 'flex', background: '#f1f5f9', padding: '2px', borderRadius: '8px', marginBottom: '12px', border: '1px solid #e2e8f0' }}>
-                                    <button
-                                        type="button"
-                                        style={{
-                                            flex: 1,
-                                            padding: '6px',
-                                            fontSize: '12px',
-                                            fontWeight: 600,
-                                            border: 'none',
-                                            borderRadius: '6px',
-                                            background: settlementType === 'cash_sale' ? '#ffffff' : 'transparent',
-                                            color: settlementType === 'cash_sale' ? 'var(--color-primary)' : 'var(--slate-500)',
-                                            cursor: 'pointer'
-                                        }}
-                                        onClick={() => setSettlementType('cash_sale')}
-                                    >
-                                        Cash Sale
-                                    </button>
-                                    <button
-                                        type="button"
-                                        style={{
-                                            flex: 1,
-                                            padding: '6px',
-                                            fontSize: '12px',
-                                            fontWeight: 600,
-                                            border: 'none',
-                                            borderRadius: '6px',
-                                            background: settlementType === 'financed_sale' ? '#ffffff' : 'transparent',
-                                            color: settlementType === 'financed_sale' ? 'var(--color-primary)' : 'var(--slate-500)',
-                                            cursor: 'pointer'
-                                        }}
-                                        onClick={() => setSettlementType('financed_sale')}
-                                    >
-                                        Financed Sale
-                                    </button>
-                                </div>
-
-                                <div className="form-group" style={{ marginBottom: '10px' }}>
-                                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Buyer Name</label>
-                                    <input 
-                                        type="text" 
-                                        className="form-input"
-                                        placeholder="Enter buyer's name"
-                                        value={buyerName}
-                                        onChange={(e) => setBuyerName(e.target.value)}
-                                        style={{ borderRadius: '8px', width: '100%', padding: '6px 12px' }}
-                                    />
-                                </div>
-                                <div className="form-group" style={{ marginBottom: '10px' }}>
-                                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Buyer Phone</label>
-                                    <input 
-                                        type="text" 
-                                        className="form-input"
-                                        placeholder="Enter buyer's phone"
-                                        value={buyerPhone}
-                                        onChange={(e) => setBuyerPhone(e.target.value)}
-                                        style={{ borderRadius: '8px', width: '100%', padding: '6px 12px' }}
-                                    />
-                                </div>
-                                <div className="form-group" style={{ marginBottom: '10px' }}>
-                                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Buyer Address</label>
-                                    <input 
-                                        type="text" 
-                                        className="form-input"
-                                        placeholder="Enter buyer's address (optional)"
-                                        value={buyerAddress}
-                                        onChange={(e) => setBuyerAddress(e.target.value)}
-                                        style={{ borderRadius: '8px', width: '100%', padding: '6px 12px' }}
-                                    />
-                                </div>
-                            </div>
-                        )}
-
-                        {settlementType !== 'financed_sale' ? (
                             <div>
-                                <div className="form-group" style={{ marginBottom: '12px' }}>
-                                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Settlement / Sale Price (₹)</label>
-                                    <input 
-                                        type="number" 
-                                        className="form-input"
-                                        placeholder="Enter settlement amount"
-                                        value={settlementAmount}
-                                        onChange={(e) => setSettlementAmount(e.target.value)}
-                                        style={{ borderRadius: '8px', width: '100%', padding: '8px 12px' }}
-                                    />
-                                </div>
+                                <h3 style={{ fontWeight: 800, fontSize: '18px', color: '#1e293b', marginBottom: '4px', marginTop: 0 }}>
+                                    {settlementType === 'reclaim' && 'Asset Reclaim'}
+                                    {settlementType === 'sell' && 'Outright Resale'}
+                                    {settlementType === 'sell_with_finance' && 'Financed Resale'}
+                                </h3>
+                                <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 16px 0', lineHeight: 1.4 }}>
+                                    Configure resolution for vehicle: <strong style={{ color: '#1e293b' }}>{selectedVehicle.vehicleNumber}</strong>
+                                </p>
 
-                                {settlementType === 'cash_sale' && (
-                                    <div className="form-group" style={{ marginBottom: '12px' }}>
-                                        <label className="form-label" style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Payment Method</label>
-                                        <select
-                                            className="form-select text-slate-800"
-                                            value={paymentMethod}
-                                            onChange={(e) => setPaymentMethod(e.target.value)}
-                                            style={{ borderRadius: '8px', width: '100%', padding: '6px 12px', border: '1px solid var(--color-border)', outline: 'none' }}
-                                        >
-                                            <option value="cash">Cash</option>
-                                            <option value="upi">UPI / Online</option>
-                                            <option value="bank">Bank Transfer</option>
-                                            <option value="cheque">Cheque</option>
-                                        </select>
+                                {/* Original Customer Summary */}
+                                <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '12.5px' }}>
+                                    <h4 style={{ fontSize: '9.5px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px 0' }}>
+                                        Original Loan Context
+                                    </h4>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            <span style={{ color: '#64748b' }}>Customer:</span>
+                                            <span style={{ fontWeight: 600, color: '#334155' }}>{selectedVehicle.customer?.name}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            <span style={{ color: '#64748b' }}>Outstanding Dues:</span>
+                                            <span style={{ fontWeight: 700, color: '#e11d48' }}>{formatCurrency(outstandingBalance)}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            <span style={{ color: '#64748b' }}>Overdue Dues:</span>
+                                            <span style={{ fontWeight: 600, color: '#475569' }}>{formatCurrency(overdueBalance)}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #e2e8f0', paddingTop: '6px', marginTop: '2px' }}>
+                                            <span style={{ color: '#64748b' }}>Disbursed:</span>
+                                            <span style={{ fontWeight: 600, color: '#334155' }}>{formatCurrency(principalDisbursed)}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            <span style={{ color: '#64748b' }}>Collected:</span>
+                                            <span style={{ fontWeight: 600, color: '#166534' }}>{formatCurrency(totalPaymentsCollected)}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Dynamic Pricing Outputs at Bottom Left */}
+                            <div style={{ marginTop: '16px' }}>
+                                {settlementType === 'sell' && (
+                                    <div style={{ background: '#fff1f2', padding: '12px', borderRadius: '10px', border: '1px solid #fecaca', fontSize: '12.5px' }}>
+                                        <h4 style={{ fontSize: '9.5px', fontWeight: 700, color: '#991b1b', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 6px 0' }}>
+                                            Outright Resale Summary
+                                        </h4>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                            <span style={{ color: '#475569' }}>Sale Price:</span>
+                                            <span style={{ fontWeight: 700, color: '#1e293b' }}>{formatCurrency(settlementAmount)}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #fecaca', paddingTop: '6px', fontWeight: 700 }}>
+                                            <span style={{ color: '#991b1b' }}>Write-off Loss:</span>
+                                            <span style={{ color: '#991b1b', fontSize: '13.5px' }}>
+                                                {formatCurrency(Math.max(0, principalDisbursed - totalPaymentsCollected - Number(settlementAmount || 0)))}
+                                            </span>
+                                        </div>
                                     </div>
                                 )}
 
-                                <div style={{ background: '#fff1f2', padding: '10px 14px', borderRadius: '8px', fontSize: '12px', color: '#991b1b', marginBottom: '20px', border: '1px solid #fecaca', display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
-                                    <span>Calculated Loss (Write-off):</span>
-                                    <span>{formatCurrency(Math.max(0, outstandingBalance - Number(settlementAmount || 0)))}</span>
-                                </div>
+                                {settlementType === 'sell_with_finance' && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        {/* Calculated Loan Principal */}
+                                        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '12px', borderRadius: '10px', fontSize: '12.5px' }}>
+                                            <h4 style={{ fontSize: '9.5px', fontWeight: 700, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 6px 0' }}>
+                                                New Finance Summary
+                                            </h4>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                                <span style={{ color: '#475569' }}>Resale Value:</span>
+                                                <span style={{ fontWeight: 600, color: '#1e293b' }}>{formatCurrency(resalePrice)}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                                <span style={{ color: '#475569' }}>Down Payment:</span>
+                                                <span style={{ fontWeight: 600, color: '#1e293b' }}>{formatCurrency(settlementAmount)}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #bbf7d0', paddingTop: '6px', fontWeight: 800 }}>
+                                                <span style={{ color: '#166534' }}>New Loan Principal:</span>
+                                                <span style={{ color: '#166534', fontSize: '14px' }}>
+                                                    {formatCurrency(Math.max(0, Number(resalePrice || 0) - Number(settlementAmount || 0)))}
+                                                </span>
+                                            </div>
+                                        </div>
 
-                                <div style={{ display: 'flex', gap: '12px' }}>
-                                    <button 
-                                        type="button"
-                                        className="btn btn-secondary"
-                                        onClick={() => setShowResaleModal(false)}
-                                        disabled={submittingSettlement}
-                                        style={{ flex: 1, borderRadius: '10px' }}
-                                    >
-                                        Cancel
-                                    </button>
+                                        {/* Old Loan Write-off */}
+                                        <div style={{ background: '#fff1f2', border: '1px solid #fecaca', padding: '12px', borderRadius: '10px', fontSize: '12.5px' }}>
+                                            <h4 style={{ fontSize: '9.5px', fontWeight: 700, color: '#991b1b', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 6px 0' }}>
+                                                Old Loan Resolution
+                                            </h4>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                                <span style={{ color: '#475569' }}>Original Principal:</span>
+                                                <span style={{ fontWeight: 600, color: '#1e293b' }}>{formatCurrency(principalDisbursed)}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                                <span style={{ color: '#475569' }}>Down Payment:</span>
+                                                <span style={{ fontWeight: 600, color: '#1e293b' }}>{formatCurrency(settlementAmount)}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #fecaca', paddingTop: '6px', fontWeight: 700 }}>
+                                                <span style={{ color: '#991b1b' }}>Write-off Loss:</span>
+                                                <span style={{ color: '#991b1b', fontSize: '13.5px' }}>
+                                                    {formatCurrency(Math.max(0, principalDisbursed - totalPaymentsCollected - Number(settlementAmount || 0)))}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* RIGHT COLUMN: White Inputs & Actions Panel */}
+                        <div 
+                            style={{
+                                flex: 1,
+                                padding: '24px 20px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'space-between',
+                                overflowY: 'auto',
+                                maxHeight: '90vh'
+                            }}
+                        >
+                            {/* Absolute close button on the right header */}
+                            <button 
+                                onClick={() => setShowResaleModal(false)}
+                                style={{ position: 'absolute', top: '16px', right: '16px', border: 'none', background: 'none', cursor: 'pointer', color: '#64748b' }}
+                                disabled={submittingSettlement}
+                            >
+                                <X size={20} />
+                            </button>
+
+                            {/* Main Body Inputs */}
+                            <div style={{ flex: 1 }}>
+                                {/* Error Alert */}
+                                {settlementError && (
+                                    <div style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.1)', color: 'rgb(239, 68, 68)', borderRadius: '8px', fontSize: '12.5px', marginBottom: '16px', fontWeight: 500 }}>
+                                        {settlementError}
+                                    </div>
+                                )}
+
+                                {settlementType === 'reclaim' && (
+                                    <div style={{ marginTop: '8px' }}>
+                                        <div className="form-group">
+                                            <label className="form-label" style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                                                Payment Amount (₹) *
+                                            </label>
+                                            <input 
+                                                type="number" 
+                                                className="form-input"
+                                                placeholder="Enter payment amount"
+                                                value={settlementAmount}
+                                                onChange={(e) => setSettlementAmount(e.target.value)}
+                                                style={{ borderRadius: '8px', width: '100%', padding: '8px 12px' }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {settlementType === 'sell' && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                            <h4 style={{ fontSize: '12px', fontWeight: 700, color: '#334155', margin: '0 0 2px 0' }}>1. Buyer Details</h4>
+                                            <div className="form-group">
+                                                <label className="form-label" style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Buyer Name *</label>
+                                                <input 
+                                                    type="text" 
+                                                    className="form-input"
+                                                    placeholder="Enter buyer's name"
+                                                    value={buyerName}
+                                                    onChange={(e) => setBuyerName(e.target.value)}
+                                                    style={{ borderRadius: '6px', width: '100%', padding: '6px 10px', fontSize: '12.5px' }}
+                                                />
+                                            </div>
+                                            <div className="form-group">
+                                                <label className="form-label" style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Buyer Phone</label>
+                                                <input 
+                                                    type="text" 
+                                                    className="form-input"
+                                                    placeholder="Enter buyer's phone"
+                                                    value={buyerPhone}
+                                                    onChange={(e) => setBuyerPhone(e.target.value)}
+                                                    style={{ borderRadius: '6px', width: '100%', padding: '6px 10px', fontSize: '12.5px' }}
+                                                />
+                                            </div>
+                                            <div className="form-group">
+                                                <label className="form-label" style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Buyer Address</label>
+                                                <input 
+                                                    type="text" 
+                                                    className="form-input"
+                                                    placeholder="Enter buyer's address (optional)"
+                                                    value={buyerAddress}
+                                                    onChange={(e) => setBuyerAddress(e.target.value)}
+                                                    style={{ borderRadius: '6px', width: '100%', padding: '6px 10px', fontSize: '12.5px' }}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <h4 style={{ fontSize: '12px', fontWeight: 700, color: '#334155', margin: '0 0 4px 0' }}>2. Pricing Details</h4>
+                                            <div className="form-group" style={{ marginBottom: '8px' }}>
+                                                <label className="form-label" style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '2px' }}>
+                                                    Sale Price (₹) *
+                                                </label>
+                                                <input 
+                                                    type="number" 
+                                                    className="form-input"
+                                                    placeholder="Enter sale price"
+                                                    value={settlementAmount}
+                                                    onChange={(e) => setSettlementAmount(e.target.value)}
+                                                    style={{ borderRadius: '6px', width: '100%', padding: '8px 12px' }}
+                                                />
+                                            </div>
+                                            <div className="form-group">
+                                                <label className="form-label" style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Payment Method</label>
+                                                <select
+                                                    className="form-select text-slate-800"
+                                                    value={paymentMethod}
+                                                    onChange={(e) => setPaymentMethod(e.target.value)}
+                                                    style={{ borderRadius: '6px', width: '100%', padding: '6px 10px', border: '1px solid var(--color-border)', outline: 'none', fontSize: '12.5px' }}
+                                                >
+                                                    <option value="cash">Cash</option>
+                                                    <option value="upi">UPI / Online</option>
+                                                    <option value="bank">Bank Transfer</option>
+                                                    <option value="cheque">Cheque</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {settlementType === 'sell_with_finance' && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                                        {/* Buyer Customer */}
+                                        <div style={{ borderBottom: '1px dashed #cbd5e1', paddingBottom: '12px' }}>
+                                            <h4 style={{ fontSize: '12px', fontWeight: 700, color: '#334155', margin: '0 0 8px 0' }}>1. Buyer Customer</h4>
+                                            
+                                            {/* Toggle existing vs new customer */}
+                                            <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setIsCreatingNewCustomer(false);
+                                                        setSelectedCustomerForFinance(null);
+                                                    }}
+                                                    style={{
+                                                        flex: 1,
+                                                        padding: '4px 8px',
+                                                        fontSize: '11px',
+                                                        fontWeight: 600,
+                                                        borderRadius: '6px',
+                                                        border: '1px solid #e2e8f0',
+                                                        background: !isCreatingNewCustomer ? '#f1f5f9' : '#ffffff',
+                                                        color: !isCreatingNewCustomer ? 'var(--brand-accent)' : '#475569',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    Search Existing
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setIsCreatingNewCustomer(true);
+                                                        setSelectedCustomerForFinance(null);
+                                                    }}
+                                                    style={{
+                                                        flex: 1,
+                                                        padding: '4px 8px',
+                                                        fontSize: '11px',
+                                                        fontWeight: 600,
+                                                        borderRadius: '6px',
+                                                        border: '1px solid #e2e8f0',
+                                                        background: isCreatingNewCustomer ? '#f1f5f9' : '#ffffff',
+                                                        color: isCreatingNewCustomer ? 'var(--brand-accent)' : '#475569',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    Add New Customer
+                                                </button>
+                                            </div>
+
+                                            {!isCreatingNewCustomer ? (
+                                                selectedCustomerForFinance ? (
+                                                    <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                        <div>
+                                                            <div style={{ fontWeight: 700, fontSize: '12px', color: '#1e293b' }}>{selectedCustomerForFinance.name}</div>
+                                                            <div style={{ fontSize: '11px', color: '#64748b' }}>{selectedCustomerForFinance.phone} | {selectedCustomerForFinance.address || 'No Address'}</div>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setSelectedCustomerForFinance(null)}
+                                                            style={{ border: 'none', background: 'none', color: '#ef4444', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}
+                                                        >
+                                                            Change
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <div style={{ position: 'relative' }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', border: '1px solid var(--color-border)', borderRadius: '6px', padding: '5px 10px' }}>
+                                                            <Search size={14} color="#64748b" />
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Type customer name or phone..."
+                                                                value={customerQuery}
+                                                                onChange={(e) => handleCustomerSearchChange(e.target.value)}
+                                                                style={{ border: 'none', outline: 'none', width: '100%', fontSize: '12px' }}
+                                                            />
+                                                        </div>
+                                                        {customersLoading && <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>Searching...</div>}
+                                                        {customerResults.length > 0 && (
+                                                            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '6px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', zIndex: 10, maxHeight: '140px', overflowY: 'auto', marginTop: '4px' }}>
+                                                                {customerResults.map(c => (
+                                                                    <div
+                                                                        key={c.id}
+                                                                        onClick={() => {
+                                                                            setSelectedCustomerForFinance(c);
+                                                                            setCustomerResults([]);
+                                                                            setCustomerQuery('');
+                                                                        }}
+                                                                        style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '11.5px', textAlign: 'left' }}
+                                                                    >
+                                                                        <span style={{ fontWeight: 600, color: '#1e293b' }}>{c.name}</span>
+                                                                        <span style={{ color: '#64748b', marginLeft: '6px' }}>({c.phone})</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )
+                                            ) : (
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', textAlign: 'left' }}>
+                                                    <div className="form-group">
+                                                        <label style={{ fontSize: '10px', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>Name *</label>
+                                                        <input
+                                                            type="text"
+                                                            className="form-input"
+                                                            placeholder="Enter name"
+                                                            value={newCustomerDetails.name}
+                                                            onChange={(e) => setNewCustomerDetails({ ...newCustomerDetails, name: e.target.value })}
+                                                            style={{ padding: '4px 8px', fontSize: '11.5px', borderRadius: '6px', width: '100%' }}
+                                                        />
+                                                    </div>
+                                                    <div className="form-group">
+                                                        <label style={{ fontSize: '10px', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>Phone *</label>
+                                                        <input
+                                                            type="text"
+                                                            className="form-input"
+                                                            placeholder="Enter phone"
+                                                            value={newCustomerDetails.phone}
+                                                            onChange={(e) => setNewCustomerDetails({ ...newCustomerDetails, phone: e.target.value })}
+                                                            style={{ padding: '4px 8px', fontSize: '11.5px', borderRadius: '6px', width: '100%' }}
+                                                        />
+                                                    </div>
+                                                    <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                                                        <label style={{ fontSize: '10px', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>Address</label>
+                                                        <input
+                                                            type="text"
+                                                            className="form-input"
+                                                            placeholder="Enter address"
+                                                            value={newCustomerDetails.address}
+                                                            onChange={(e) => setNewCustomerDetails({ ...newCustomerDetails, address: e.target.value })}
+                                                            style={{ padding: '4px 8px', fontSize: '11.5px', borderRadius: '6px', width: '100%' }}
+                                                        />
+                                                    </div>
+                                                    <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                                                        <label style={{ fontSize: '10px', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>Aadhaar Number</label>
+                                                        <input
+                                                            type="text"
+                                                            className="form-input"
+                                                            placeholder="Enter 12 digit Aadhaar"
+                                                            value={newCustomerDetails.aadharNumber}
+                                                            onChange={(e) => setNewCustomerDetails({ ...newCustomerDetails, aadharNumber: e.target.value })}
+                                                            style={{ padding: '4px 8px', fontSize: '11.5px', borderRadius: '6px', width: '100%' }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Pricing & Downpayment */}
+                                        <div style={{ borderBottom: '1px dashed #cbd5e1', paddingBottom: '12px' }}>
+                                            <h4 style={{ fontSize: '12px', fontWeight: 700, color: '#334155', margin: '0 0 8px 0' }}>2. Pricing & Down Payment</h4>
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', textAlign: 'left' }}>
+                                                <div className="form-group">
+                                                    <label style={{ fontSize: '10px', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>Resale Price (₹) *</label>
+                                                    <input
+                                                        type="number"
+                                                        className="form-input"
+                                                        placeholder="Resale Price"
+                                                        value={resalePrice}
+                                                        onChange={(e) => setResalePrice(e.target.value)}
+                                                        style={{ padding: '4px 8px', fontSize: '11.5px', borderRadius: '6px', width: '100%' }}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label style={{ fontSize: '10px', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>Down Payment (₹) *</label>
+                                                    <input
+                                                        type="number"
+                                                        className="form-input"
+                                                        placeholder="Down Payment"
+                                                        value={settlementAmount}
+                                                        onChange={(e) => setSettlementAmount(e.target.value)}
+                                                        style={{ padding: '4px 8px', fontSize: '11.5px', borderRadius: '6px', width: '100%' }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* New Loan Terms */}
+                                        <div style={{ borderBottom: '1px dashed #cbd5e1', paddingBottom: '12px' }}>
+                                            <h4 style={{ fontSize: '12px', fontWeight: 700, color: '#334155', margin: '0 0 8px 0' }}>3. New Loan Terms</h4>
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', textAlign: 'left' }}>
+                                                <div className="form-group">
+                                                    <label style={{ fontSize: '10px', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>Tenure (Months) *</label>
+                                                    <input
+                                                        type="number"
+                                                        className="form-input"
+                                                        placeholder="Months"
+                                                        value={loanTenure}
+                                                        onChange={(e) => setLoanTenure(e.target.value)}
+                                                        style={{ padding: '4px 8px', fontSize: '11.5px', borderRadius: '6px', width: '100%' }}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label style={{ fontSize: '10px', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>Monthly Rate (%) *</label>
+                                                    <input
+                                                        type="number"
+                                                        className="form-input"
+                                                        placeholder="Rate"
+                                                        value={loanInterestRate}
+                                                        onChange={(e) => setLoanInterestRate(e.target.value)}
+                                                        style={{ padding: '4px 8px', fontSize: '11.5px', borderRadius: '6px', width: '100%' }}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label style={{ fontSize: '10px', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>Start Date *</label>
+                                                    <input
+                                                        type="date"
+                                                        className="form-input"
+                                                        value={loanStartDate}
+                                                        onChange={(e) => setLoanStartDate(e.target.value)}
+                                                        style={{ padding: '3px 6px', fontSize: '11px', borderRadius: '6px', width: '100%' }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Guarantor Details */}
+                                        <div>
+                                            <h4 style={{ fontSize: '12px', fontWeight: 700, color: '#334155', margin: '0 0 8px 0' }}>4. Guarantor (Jamin) Details</h4>
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', textAlign: 'left' }}>
+                                                <div className="form-group">
+                                                    <label style={{ fontSize: '10px', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>Guarantor Name *</label>
+                                                    <input
+                                                        type="text"
+                                                        className="form-input"
+                                                        placeholder="Guarantor Name"
+                                                        value={guarantorName}
+                                                        onChange={(e) => setGuarantorName(e.target.value)}
+                                                        style={{ padding: '4px 8px', fontSize: '11.5px', borderRadius: '6px', width: '100%' }}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label style={{ fontSize: '10px', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>Guarantor Phone *</label>
+                                                    <input
+                                                        type="text"
+                                                        className="form-input"
+                                                        placeholder="Guarantor Phone"
+                                                        value={guarantorPhone}
+                                                        onChange={(e) => setGuarantorPhone(e.target.value)}
+                                                        style={{ padding: '4px 8px', fontSize: '11.5px', borderRadius: '6px', width: '100%' }}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label style={{ fontSize: '10px', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>Guarantor Aadhaar</label>
+                                                    <input
+                                                        type="text"
+                                                        className="form-input"
+                                                        placeholder="Guarantor Aadhaar"
+                                                        value={guarantorAadhar}
+                                                        onChange={(e) => setGuarantorAadhar(e.target.value)}
+                                                        style={{ padding: '4px 8px', fontSize: '11.5px', borderRadius: '6px', width: '100%' }}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label style={{ fontSize: '10px', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>Guarantor Address</label>
+                                                    <input
+                                                        type="text"
+                                                        className="form-input"
+                                                        placeholder="Guarantor Address"
+                                                        value={guarantorAddress}
+                                                        onChange={(e) => setGuarantorAddress(e.target.value)}
+                                                        style={{ padding: '4px 8px', fontSize: '11.5px', borderRadius: '6px', width: '100%' }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Modal Footer Actions (Inside the right column at the bottom) */}
+                            <div style={{ display: 'flex', gap: '10px', marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
+                                <button 
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    onClick={() => setShowResaleModal(false)}
+                                    disabled={submittingSettlement}
+                                    style={{ flex: 1, borderRadius: '8px', padding: '8px 12px', fontSize: '12.5px' }}
+                                >
+                                    Cancel
+                                </button>
+
+                                {settlementType === 'reclaim' && (
                                     <button 
                                         type="button"
                                         className="btn btn-primary"
-                                        disabled={submittingSettlement || (settlementType === 'cash_sale' && !buyerName)}
+                                        disabled={submittingSettlement}
                                         onClick={async () => {
                                             setSubmittingSettlement(true);
                                             setSettlementError('');
                                             try {
                                                 await api.settleSeizure(selectedVehicle.seizures[0].id, {
-                                                    settlementType,
+                                                    settlementType: 'reclaim',
+                                                    settlementAmount: Number(settlementAmount),
+                                                    paymentMethod: 'cash'
+                                                });
+                                                setShowResaleModal(false);
+                                                loadVehicles(); // Refresh
+                                            } catch (err) {
+                                                setSettlementError(err.message || 'Failed to submit reclaim');
+                                            } finally {
+                                                setSubmittingSettlement(false);
+                                            }
+                                        }}
+                                        style={{ flex: 2, borderRadius: '8px', padding: '8px 12px', fontSize: '12.5px' }}
+                                    >
+                                        {submittingSettlement ? 'Saving...' : 'Confirm Reclaim'}
+                                    </button>
+                                )}
+
+                                {settlementType === 'sell' && (
+                                    <button 
+                                        type="button"
+                                        className="btn btn-primary"
+                                        disabled={submittingSettlement || !buyerName}
+                                        onClick={async () => {
+                                            setSubmittingSettlement(true);
+                                            setSettlementError('');
+                                            try {
+                                                await api.settleSeizure(selectedVehicle.seizures[0].id, {
+                                                    settlementType: 'sell',
                                                     settlementAmount: Number(settlementAmount),
                                                     buyerName,
                                                     buyerPhone,
@@ -982,68 +1284,91 @@ export default function VehicleInventory() {
                                                 setShowResaleModal(false);
                                                 loadVehicles(); // Refresh
                                             } catch (err) {
-                                                setSettlementError(err.message || 'Failed to submit settlement');
+                                                setSettlementError(err.message || 'Failed to submit sale');
                                             } finally {
                                                 setSubmittingSettlement(false);
                                             }
                                         }}
-                                        style={{ flex: 1, borderRadius: '10px' }}
+                                        style={{ flex: 2, borderRadius: '8px', padding: '8px 12px', fontSize: '12.5px' }}
                                     >
-                                        {submittingSettlement ? 'Saving...' : settlementType === 'redemption' ? 'Confirm Redemption' : 'Confirm Cash Sale'}
+                                        {submittingSettlement ? 'Saving...' : 'Confirm Sale'}
                                     </button>
-                                </div>
-                            </div>
-                        ) : (
-                            <div style={{ textAlign: 'center', padding: '10px 0' }}>
-                                <div style={{ background: '#f0fdf4', color: '#15803d', padding: '12px', borderRadius: '8px', fontSize: '12.5px', lineHeight: '1.5', marginBottom: '20px', textAlign: 'left', border: '1px solid #bbf7d0' }}>
-                                    This will settle and close the old customer's loan (calculating the loss write-off), transfer vehicle ownership to the new buyer, and redirect you to the <strong>New Loan Wizard</strong> with this vehicle pre-selected.
-                                </div>
+                                )}
 
-                                <div style={{ display: 'flex', gap: '12px' }}>
-                                    <button 
-                                        type="button"
-                                        className="btn btn-secondary"
-                                        onClick={() => setShowResaleModal(false)}
-                                        disabled={submittingSettlement}
-                                        style={{ flex: 1, borderRadius: '10px' }}
-                                    >
-                                        Cancel
-                                    </button>
+                                {settlementType === 'sell_with_finance' && (
                                     <button
                                         type="button"
                                         className="btn btn-primary"
-                                        disabled={submittingSettlement || !buyerName}
-                                        style={{ flex: 1, borderRadius: '10px' }}
+                                        disabled={
+                                            submittingSettlement || 
+                                            (!selectedCustomerForFinance && (!newCustomerDetails.name || !newCustomerDetails.phone)) ||
+                                            !resalePrice || 
+                                            !settlementAmount || 
+                                            !loanTenure || 
+                                            !loanInterestRate ||
+                                            !guarantorName ||
+                                            !guarantorPhone
+                                        }
+                                        style={{ flex: 2, borderRadius: '8px', background: 'var(--brand-accent)', border: 'none', color: '#ffffff', padding: '8px 12px', fontSize: '12.5px' }}
                                         onClick={async () => {
                                             setSubmittingSettlement(true);
                                             setSettlementError('');
                                             try {
-                                                const res = await api.settleSeizure(selectedVehicle.seizures[0].id, {
-                                                    settlementType: 'financed_sale',
-                                                    settlementAmount: 0, // Dues transfered to new financed loan
-                                                    buyerName,
-                                                    buyerPhone,
-                                                    buyerAddress
+                                                // 1. Resolve / Create the customer
+                                                let targetCustomer = selectedCustomerForFinance;
+                                                if (isCreatingNewCustomer) {
+                                                    targetCustomer = await api.createCustomer({
+                                                        ...newCustomerDetails,
+                                                        aadharNumber: newCustomerDetails.aadharNumber.replace(/\s/g, '')
+                                                    });
+                                                }
+
+                                                if (!targetCustomer?.id) {
+                                                    throw new Error('Failed to resolve target customer');
+                                                }
+
+                                                // 2. Settle the Seizure
+                                                await api.settleSeizure(selectedVehicle.seizures[0].id, {
+                                                    settlementType: 'sell_with_finance',
+                                                    downPayment: Number(settlementAmount),
+                                                    buyerName: targetCustomer.name,
+                                                    buyerPhone: targetCustomer.phone,
+                                                    buyerAddress: targetCustomer.address
                                                 });
+
+                                                // 3. Create the Loan
+                                                const principalVal = Number(resalePrice) - Number(settlementAmount);
+                                                const createdLoan = await api.createLoan({
+                                                    customerId: targetCustomer.id,
+                                                    vehicleId: selectedVehicle.id,
+                                                    principalAmount: principalVal,
+                                                    tenureMonths: Number(loanTenure),
+                                                    monthlyInterestRate: Number(loanInterestRate) / 100,
+                                                    startDate: loanStartDate,
+                                                    guarantors: [{
+                                                        name: guarantorName,
+                                                        phone: guarantorPhone,
+                                                        aadharNumber: guarantorAadhar ? guarantorAadhar.replace(/\s/g, '') : '',
+                                                        address: guarantorAddress
+                                                    }]
+                                                });
+
                                                 setShowResaleModal(false);
-                                                loadVehicles(); // Refresh
-                                                navigate(`/loans/new?preselectVehicleId=${selectedVehicle.id}&buyerCustomerId=${res.buyerCustomer?.id}`);
+                                                navigate(`/loans/${createdLoan.id}`);
                                             } catch (err) {
-                                                setSettlementError(err.message || 'Failed to settle and redirect');
-                                            } finally {
+                                                setSettlementError(err.message || 'Failed to complete financed sale');
                                                 setSubmittingSettlement(false);
                                             }
                                         }}
                                     >
-                                        {submittingSettlement ? 'Processing...' : 'Settle & Setup Finance'}
+                                        {submittingSettlement ? 'Processing...' : 'Confirm & Create Loan'}
                                     </button>
-                                </div>
+                                )}
                             </div>
-                        )}
+                        </div>
                     </div>
                 </div>
-            )}
-            {showSeizureModal && selectedVehicle && (
+            )}{showSeizureModal && selectedVehicle && (
                 <SeizureModal 
                     loanId={selectedVehicle.loans?.[0]?.id || selectedVehicle.seizures?.[0]?.loanId}
                     vehicleId={selectedVehicle.id}

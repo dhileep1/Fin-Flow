@@ -262,12 +262,9 @@ export default function Dashboard() {
 
     /* ── Derived targets (recalculate based on timeFrame) ── */
     const targets = useMemo(() => {
-        if (!stats) return null;
-
-        const collectionsToday = stats.todayCollections || 0;
-        const totalGiven = stats.totalOutstanding || 0;
-        const activeLoans = stats.activeLoans || 0;
-        const criticalDues = stats.criticalDues || 0;
+        const collectionsToday = stats?.todayCollections || 0;
+        const activeLoans = stats?.activeLoans || 0;
+        const criticalDues = stats?.criticalDues || 0;
 
         // Base daily targets — multiplied by timeframe
         const baseDailyCollTarget = 500000;
@@ -282,7 +279,7 @@ export default function Dashboard() {
 
         // Actuals from backend are already period-aware
         const periodCollections = collectionsToday;
-        const periodDisbursements = stats.totalGiven || 0;
+        const periodDisbursements = stats?.totalGiven || 0;
 
         // Overdue dues amount
         const overdueDuesAmount = criticalDues * 12500;

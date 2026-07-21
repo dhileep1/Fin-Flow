@@ -49,6 +49,18 @@ function generateSchedule(principalAmount, tenureMonths, monthlyInterestRate, st
         const totalDue = principalDue.plus(interestDue);
         const dueDate = addMonths(new Date(startDate), i);
 
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const dueD = new Date(dueDate);
+        dueD.setHours(0, 0, 0, 0);
+
+        let status = 'upcoming';
+        if (dueD < today) {
+            status = 'overdue';
+        } else if (dueD.getTime() === today.getTime()) {
+            status = 'pending';
+        }
+
         dues.push({
             dueSequence: i,
             dueDate,
@@ -57,7 +69,7 @@ function generateSchedule(principalAmount, tenureMonths, monthlyInterestRate, st
             penaltyDue: new Prisma.Decimal(0),
             amountPaid: new Prisma.Decimal(0),
             totalDue,
-            status: 'upcoming',
+            status,
         });
     }
 
@@ -67,7 +79,7 @@ function generateSchedule(principalAmount, tenureMonths, monthlyInterestRate, st
 /**
  * Create a new loan with full schedule generation.
  */
-async function createLoan({ orgId, customerId, vehicleId, assignedStaffId, principalAmount, tenureMonths, monthlyInterestRate, startDate, userId }) {
+async function createLoan({ orgId, customerId, vehicleId, assignedStaffId, principalAmount, tenureMonths, monthlyInterestRate, startDate, userId, disbursedAmountOverride }) {
     const P = new Prisma.Decimal(principalAmount);
     const r = new Prisma.Decimal(monthlyInterestRate);
     const N = tenureMonths;
@@ -81,7 +93,7 @@ async function createLoan({ orgId, customerId, vehicleId, assignedStaffId, princ
 
     // Compute fees
     const documentFee = new Prisma.Decimal(P.times(docFeePercent).toFixed(2));
-    const disbursedAmount = P.minus(documentFee);
+    const disbursedAmount = disbursedAmountOverride !== undefined ? new Prisma.Decimal(disbursedAmountOverride) : P.minus(documentFee);
 
     // Generate schedule
     const { monthlyPrincipal, monthlyInterest, dues } = generateSchedule(P, N, r, startDate);
@@ -196,7 +208,13 @@ async function getLoanById(orgId, loanId) {
         include: {
             loanDues: { orderBy: { dueSequence: 'asc' } },
             customer: true,
-            vehicle: true,
+            vehicle: {
+                include: {
+                    seizures: {
+                        orderBy: { createdAt: 'desc' }
+                    }
+                }
+            },
             guarantors: true,
             payments: {
                 include: { receipts: true },
@@ -722,5 +740,40 @@ async function executeForeclosure(orgId, loanId, { foreclosureRate, paymentMetho
     });
 }
 
-module.exports = { generateSchedule, createLoan, getLoanById, listLoans, calculateForeclosureQuote, executeForeclosure };
+async function closeLoan(orgId, loanId, userId) {
+    const loan = await prisma.loan.findFirst({
+        where: { id: loanId, orgId },
+        include: { loanDues: true }
+    });
+
+    if (!loan) {
+        throw new Error('Loan not found');
+    }
+
+    const allDuesPaid = loan.loanDues.every(d => d.status === 'paid' || Number(d.amountPaid) >= Number(d.totalDue));
+    if (!allDuesPaid) {
+        throw new Error('Cannot close loan: not all dues are paid');
+    }
+
+    const updatedLoan = await prisma.loan.update({
+        where: { id: loanId },
+        data: {
+            status: 'closed'
+        }
+    });
+
+    const { logAudit } = require('./audit.service');
+    await logAudit({
+        orgId,
+        userId,
+        action: 'loan_closed',
+        entityType: 'loan',
+        entityId: loanId,
+        metadata: { closedAt: new Date().toISOString() }
+    });
+
+    return updatedLoan;
+}
+
+module.exports = { generateSchedule, createLoan, getLoanById, listLoans, calculateForeclosureQuote, executeForeclosure, closeLoan };
 

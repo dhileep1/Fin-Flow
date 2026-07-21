@@ -30,6 +30,7 @@ model Organization {
   guarantors    Guarantor[]
   expenses      Expense[]
   seizures      VehicleSeizure[]
+  vehicleSales  VehicleSale[]
 
   @@map("organizations")
 }
@@ -52,6 +53,7 @@ model User {
   payments       Payment[]     @relation("PaymentCreator")
   expenses       Expense[]     @relation("ExpenseCreator")
   seizures       VehicleSeizure[] @relation("SeizureExecutor")
+  vehicleSales   VehicleSale[]    @relation("VehicleSaleCreator")
 
   @@unique([orgId, phone], map: "ux_users_org_phone")
   @@unique([orgId, email], map: "ux_users_org_email")
@@ -97,6 +99,8 @@ model Vehicle {
   customer Customer     @relation(fields: [customerId], references: [id])
   loans    Loan[]
   seizures VehicleSeizure[]
+  vehicleSales VehicleSale[]
+  expenses Expense[]
 
   @@unique([orgId, vehicleNumber], map: "ux_vehicles_org_number")
   @@map("vehicles")
@@ -156,6 +160,7 @@ model Loan {
   callTasks     CallTask[]
   guarantors    Guarantor[]
   seizures      VehicleSeizure[]
+  vehicleSales  VehicleSale[]
 
   @@index([orgId, nextDueDate])
   @@index([orgId, assignedStaffId])
@@ -330,6 +335,8 @@ model Expense {
 
   org     Organization @relation(fields: [orgId], references: [id])
   creator User?        @relation("ExpenseCreator", fields: [createdBy], references: [id])
+  vehicleId String?    @map("vehicle_id") @db.Uuid
+  vehicle   Vehicle?   @relation(fields: [vehicleId], references: [id])
 
   @@map("expenses")
 }
@@ -342,7 +349,6 @@ model VehicleSeizure {
   seizedBy        String   @map("seized_by") @db.Uuid
   seizureDate     DateTime @default(now()) @map("seizure_date")
   yardLocation    String?  @map("yard_location")
-  valuationAmount Decimal? @map("valuation_amount") @db.Decimal(18, 2)
   status          String   @default("in_yard")
   notes           String?
   settlementType  String?  @map("settlement_type")
@@ -350,16 +356,46 @@ model VehicleSeizure {
   lossAmount      Decimal? @map("loss_amount") @db.Decimal(18, 2)
   settledAt       DateTime? @map("settled_at")
   settledBy       String?  @map("settled_by")
+  buyerName       String?  @map("buyer_name")
+  buyerPhone      String?  @map("buyer_phone")
+  buyerCustomerId String?  @map("buyer_customer_id") @db.Uuid
   createdAt       DateTime @default(now()) @map("created_at")
 
   org             Organization @relation(fields: [orgId], references: [id])
   vehicle         Vehicle      @relation(fields: [vehicleId], references: [id])
   loan            Loan         @relation(fields: [loanId], references: [id])
   user            User         @relation("SeizureExecutor", fields: [seizedBy], references: [id])
+  vehicleSales    VehicleSale[]
 
   @@index([orgId])
   @@index([vehicleId])
   @@index([loanId])
   @@index([seizedBy])
   @@map("vehicle_seizures")
+}
+
+model VehicleSale {
+  id              String   @id @default(uuid()) @db.Uuid
+  orgId           String   @map("org_id") @db.Uuid
+  seizureId       String   @map("seizure_id") @db.Uuid
+  vehicleId       String   @map("vehicle_id") @db.Uuid
+  loanId          String   @map("loan_id") @db.Uuid
+  saleAmount      Decimal  @map("sale_amount") @db.Decimal(18, 2)
+  saleType        String   @map("sale_type")
+  buyerName       String?  @map("buyer_name")
+  buyerPhone      String?  @map("buyer_phone")
+  buyerCustomerId String?  @map("buyer_customer_id") @db.Uuid
+  paymentMethod   String?  @map("payment_method")
+  saleDate        DateTime @default(now()) @map("sale_date")
+  createdBy       String?  @map("created_by") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  org       Organization   @relation(fields: [orgId], references: [id])
+  seizure   VehicleSeizure @relation(fields: [seizureId], references: [id])
+  vehicle   Vehicle        @relation(fields: [vehicleId], references: [id])
+  loan      Loan           @relation(fields: [loanId], references: [id])
+  creator   User?          @relation("VehicleSaleCreator", fields: [createdBy], references: [id])
+
+  @@index([orgId])
+  @@map("vehicle_sales")
 }

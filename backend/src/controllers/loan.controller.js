@@ -219,5 +219,14 @@ async function forecloseLoan(req, res, next) {
     }
 }
 
-module.exports = { createLoan, getLoan, listLoans, getDues, getForeclosureQuote, forecloseLoan };
+async function closeLoan(req, res, next) {
+    try {
+        const result = await loanService.closeLoan(req.orgId, req.params.id, req.user.id);
+        res.json(decryptLoan(result));
+    } catch (err) {
+        next(err);
+    }
+}
+
+module.exports = { createLoan, getLoan, listLoans, getDues, getForeclosureQuote, forecloseLoan, closeLoan };
 

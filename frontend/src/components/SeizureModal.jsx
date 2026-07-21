@@ -4,7 +4,6 @@ import { AlertTriangle, DollarSign, FileText, Calendar } from 'lucide-react';
 
 export default function SeizureModal({ loanId, vehicleId, customerName, vehicleNumber, onClose, onSuccess }) {
     const [seizureDate, setSeizureDate] = useState(() => new Date().toISOString().split('T')[0]);
-    const [valuationAmount, setValuationAmount] = useState('');
     const [notes, setNotes] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState('');
@@ -18,7 +17,6 @@ export default function SeizureModal({ loanId, vehicleId, customerName, vehicleN
                 loanId,
                 vehicleId,
                 seizureDate: seizureDate || undefined,
-                valuationAmount: valuationAmount ? Number(valuationAmount) : undefined,
                 notes: notes || undefined,
             });
             onSuccess();
@@ -71,22 +69,7 @@ export default function SeizureModal({ loanId, vehicleId, customerName, vehicleN
                             />
                         </div>
 
-                        <div className="form-group">
-                            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                <DollarSign size={12} /> Valuation Amount (Optional)
-                            </label>
-                            <div className="input-affix-wrapper has-prefix">
-                                <span className="input-prefix">₹</span>
-                                <input
-                                    className="form-input"
-                                    type="number"
-                                    step="0.01"
-                                    value={valuationAmount}
-                                    onChange={(e) => setValuationAmount(e.target.value)}
-                                    placeholder="Enter estimated value"
-                                />
-                            </div>
-                        </div>
+
 
                         <div className="form-group">
                             <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>

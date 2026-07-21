@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/client';
 import { Search, Phone, Car, Bike, ChevronLeft, ChevronRight, FileText, Check, X, IndianRupee } from 'lucide-react';
+import PaymentModal from '../components/PaymentModal';
 import '../styles/callPanel.css';
 
 const PAGE_SIZE = 6;
@@ -9,6 +10,7 @@ const PAGE_SIZE = 6;
 export default function Loans() {
     const navigate = useNavigate();
     const [loans, setLoans] = useState([]);
+    const [selectedLoanForPayment, setSelectedLoanForPayment] = useState(null);
     const [loading, setLoading] = useState(true);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
@@ -197,6 +199,8 @@ export default function Loans() {
                     <option value="active">Active</option>
                     <option value="closed">Closed</option>
                     <option value="overdue">Overdue</option>
+                    <option value="written_off">Written Off / Resold</option>
+                    <option value="seized">Seized</option>
                 </select>
             </div>
 
@@ -258,7 +262,7 @@ export default function Loans() {
                                                 <div className="flex gap-2 justify-center">
                                                     <button className="btn btn-sm btn-premium-action" onClick={(e) => {
                                                         e.stopPropagation();
-                                                        navigate(`/loans/${loan.loanId || loan.id}`);
+                                                        setSelectedLoanForPayment(loan);
                                                     }}>
                                                         <IndianRupee size={13} opacity={0.2} />
                                                         <span>Pay</span>
@@ -301,6 +305,18 @@ export default function Loans() {
                                 </button>
                             </div>
                         </div>
+                    )}
+                    {selectedLoanForPayment && (
+                        <PaymentModal
+                            loanId={selectedLoanForPayment.id}
+                            customerName={selectedLoanForPayment.customer?.name}
+                            outstanding={selectedLoanForPayment.outstandingPrincipal}
+                            onClose={() => setSelectedLoanForPayment(null)}
+                            onSuccess={() => {
+                                setSelectedLoanForPayment(null);
+                                loadLoans();
+                            }}
+                        />
                     )}
                 </div>
             </div>

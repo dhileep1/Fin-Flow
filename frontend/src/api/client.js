@@ -98,14 +98,14 @@ class ApiClient {
 
     // --- Vehicles ---
     getVehicles(params = '') { return this.get(`/vehicles?${params}`); }
+    getVehicle(id) { return this.get(`/vehicles/${id}`); }
     createVehicle(data) { return this.post('/vehicles', data); }
 
     // --- Seizures ---
     seizeVehicle(data) { return this.post('/seizures', data); }
     getSeizedInventory(params = '') { return this.get(`/seizures/inventory?${params}`); }
-    updateSeizureValuation(id, valuationAmount) { return this.put(`/seizures/${id}/valuation`, { valuationAmount }); }
-    resellVehicle(id, data) { return this.post(`/seizures/${id}/resell`, data); }
     settleSeizure(id, data) { return this.post(`/seizures/${id}/settle`, data); }
+    getVehicleSales(params = '') { return this.get(`/seizures/sales?${params}`); }
 
     // --- Loans ---
     getLoans(params = '') { return this.get(`/loans?${params}`); }
@@ -114,6 +114,7 @@ class ApiClient {
     getDues(params = '') { return this.get(`/loans/dues?${params}`); }
     getForeclosureQuote(loanId, rate) { return this.get(`/loans/${loanId}/foreclosure-quote?foreclosureRate=${rate}`); }
     forecloseLoan(loanId, data) { return this.post(`/loans/${loanId}/foreclose`, data); }
+    closeLoan(loanId) { return this.post(`/loans/${loanId}/close`); }
 
     // --- Payments ---
     createPayment(data) { return this.post('/payments', data); }
