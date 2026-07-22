@@ -12,13 +12,13 @@ const logger = require('../utils/logger');
  * Applies payment in order: penalty → interest → principal (configurable per-tenant).
  * Iterates dues oldest first.
  */
-async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNumber, createdBy, paymentDate, idempotencyKey }) {
+async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNumber, createdBy, paymentDate, idempotencyKey, tx: externalTx }) {
     if (paymentDate) {
         validatePaymentDate(paymentDate);
     }
 
     if (idempotencyKey) {
-        const existing = await prisma.payment.findFirst({
+        const existing = await (externalTx || prisma).payment.findFirst({
             where: { orgId, idempotencyKey },
             include: { receipts: true }
         });
@@ -38,7 +38,7 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
 
     let result;
     try {
-        result = await prisma.$transaction(async (tx) => {
+        const runTransactionWork = async (tx) => {
             // BIZ-6: Pessimistic lock on organization row to prevent race conditions on receipt sequences
             if (tx.$queryRawUnsafe) {
                 await tx.$queryRawUnsafe(
@@ -251,7 +251,13 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
         });
 
         return { payment, receipt, allocationDetails, creditBalance: remaining.toNumber(), customerId: loan.customerId };
-    });
+        };
+
+        if (externalTx) {
+            result = await runTransactionWork(externalTx);
+        } else {
+            result = await prisma.$transaction(runTransactionWork);
+        }
     } catch (err) {
         if (err.code === 'P2002' && idempotencyKey) {
             const existing = await prisma.payment.findFirst({

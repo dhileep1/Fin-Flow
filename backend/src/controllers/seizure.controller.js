@@ -40,7 +40,22 @@ async function getSeizedInventory(req, res, next) {
 async function settleSeizure(req, res, next) {
     try {
         const { id } = req.params;
-        const { settlementType, settlementAmount, downPayment, buyerName, buyerPhone, buyerAddress, paymentMethod } = req.body;
+        const {
+            settlementType,
+            settlementAmount,
+            downPayment,
+            buyerName,
+            buyerPhone,
+            buyerAddress,
+            buyerCustomerId,
+            resalePrice,
+            principalAmount,
+            tenureMonths,
+            monthlyInterestRate,
+            startDate,
+            guarantors,
+            paymentMethod
+        } = req.body;
         
         const result = await seizureService.settleSeizure({
             orgId: req.orgId,
@@ -51,6 +66,13 @@ async function settleSeizure(req, res, next) {
             buyerName,
             buyerPhone,
             buyerAddress,
+            buyerCustomerId,
+            resalePrice,
+            principalAmount,
+            tenureMonths,
+            monthlyInterestRate,
+            startDate,
+            guarantors,
             paymentMethod,
             userId: req.user.id
         });

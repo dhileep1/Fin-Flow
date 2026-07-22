@@ -1273,7 +1273,7 @@ export default function VehicleInventory() {
                                             setSubmittingSettlement(true);
                                             setSettlementError('');
                                             try {
-                                                await api.settleSeizure(selectedVehicle.seizures[0].id, {
+                                                const res = await api.settleSeizure(selectedVehicle.seizures[0].id, {
                                                     settlementType: 'sell',
                                                     settlementAmount: Number(settlementAmount),
                                                     buyerName,
@@ -1282,7 +1282,11 @@ export default function VehicleInventory() {
                                                     paymentMethod
                                                 });
                                                 setShowResaleModal(false);
-                                                loadVehicles(); // Refresh
+                                                if (res?.loan?.id) {
+                                                    navigate(`/loans/${res.loan.id}`);
+                                                } else {
+                                                    loadVehicles();
+                                                }
                                             } catch (err) {
                                                 setSettlementError(err.message || 'Failed to submit sale');
                                             } finally {
@@ -1314,37 +1318,25 @@ export default function VehicleInventory() {
                                             setSubmittingSettlement(true);
                                             setSettlementError('');
                                             try {
-                                                // 1. Resolve / Create the customer
-                                                let targetCustomer = selectedCustomerForFinance;
-                                                if (isCreatingNewCustomer) {
-                                                    targetCustomer = await api.createCustomer({
-                                                        ...newCustomerDetails,
-                                                        aadharNumber: newCustomerDetails.aadharNumber.replace(/\s/g, '')
-                                                    });
-                                                }
+                                                const principalVal = Number(resalePrice) - Number(settlementAmount);
+                                                const buyerCustId = selectedCustomerForFinance ? selectedCustomerForFinance.id : null;
+                                                const bName = selectedCustomerForFinance ? selectedCustomerForFinance.name : newCustomerDetails.name;
+                                                const bPhone = selectedCustomerForFinance ? selectedCustomerForFinance.phone : newCustomerDetails.phone;
+                                                const bAddr = selectedCustomerForFinance ? selectedCustomerForFinance.address : newCustomerDetails.address;
 
-                                                if (!targetCustomer?.id) {
-                                                    throw new Error('Failed to resolve target customer');
-                                                }
-
-                                                // 2. Settle the Seizure
-                                                await api.settleSeizure(selectedVehicle.seizures[0].id, {
+                                                const res = await api.settleSeizure(selectedVehicle.seizures[0].id, {
                                                     settlementType: 'sell_with_finance',
                                                     downPayment: Number(settlementAmount),
-                                                    buyerName: targetCustomer.name,
-                                                    buyerPhone: targetCustomer.phone,
-                                                    buyerAddress: targetCustomer.address
-                                                });
-
-                                                // 3. Create the Loan
-                                                const principalVal = Number(resalePrice) - Number(settlementAmount);
-                                                const createdLoan = await api.createLoan({
-                                                    customerId: targetCustomer.id,
-                                                    vehicleId: selectedVehicle.id,
+                                                    resalePrice: Number(resalePrice),
                                                     principalAmount: principalVal,
                                                     tenureMonths: Number(loanTenure),
                                                     monthlyInterestRate: Number(loanInterestRate) / 100,
                                                     startDate: loanStartDate,
+                                                    buyerCustomerId: buyerCustId,
+                                                    buyerName: bName,
+                                                    buyerPhone: bPhone,
+                                                    buyerAddress: bAddr,
+                                                    paymentMethod: 'cash',
                                                     guarantors: [{
                                                         name: guarantorName,
                                                         phone: guarantorPhone,
@@ -1354,7 +1346,11 @@ export default function VehicleInventory() {
                                                 });
 
                                                 setShowResaleModal(false);
-                                                navigate(`/loans/${createdLoan.id}`);
+                                                if (res?.loan?.id) {
+                                                    navigate(`/loans/${res.loan.id}`);
+                                                } else {
+                                                    loadVehicles();
+                                                }
                                             } catch (err) {
                                                 setSettlementError(err.message || 'Failed to complete financed sale');
                                                 setSubmittingSettlement(false);

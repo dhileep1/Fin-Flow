@@ -612,7 +612,10 @@ router.get('/audit-logs/entity/:entityType/:entityId', requireRole('admin'), asy
 
         if (entityType === 'call_log') {
             const callLog = await prisma.callLog.findFirst({
-                where: { id: entityId }
+                where: {
+                    id: entityId,
+                    callTask: { orgId: req.orgId }
+                }
             });
             if (!callLog) return res.status(404).json({ error: 'Call log not found' });
             return res.json(callLog);
@@ -877,7 +880,10 @@ router.put('/audit-logs/entity/:entityType/:entityId', requireRole('admin'), asy
             const { outcome, notes, promisedPaymentAmount, promisedPaymentDate, nextFollowupDate } = req.body;
 
             const existing = await prisma.callLog.findFirst({
-                where: { id: entityId }
+                where: {
+                    id: entityId,
+                    callTask: { orgId: req.orgId }
+                }
             });
             if (!existing) return res.status(404).json({ error: 'Call log not found' });
 

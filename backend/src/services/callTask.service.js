@@ -55,6 +55,7 @@ async function getCallQueue(orgId, { assignedStaffId, dueBefore, page = 1, limit
             },
             orderBy: [
                 { nextCallDate: 'asc' },
+                { loan: { outstandingPrincipal: 'desc' } }
             ],
             skip: (page - 1) * limit,
             take: limit,

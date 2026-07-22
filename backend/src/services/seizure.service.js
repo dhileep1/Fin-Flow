@@ -2,6 +2,8 @@ const prisma = require('../config/database');
 const { Prisma } = require('@prisma/client');
 const { logAudit } = require('./audit.service');
 const { v4: uuidv4 } = require('uuid');
+const { generateSchedule } = require('./loan.service');
+const { addMonths } = require('../utils/dateUtils');
 
 /**
  * Seize a vehicle associated with a loan.
@@ -146,7 +148,8 @@ async function resolveOrCreateBuyer(tx, orgId, buyerName, buyerPhone, buyerAddre
 async function settleSeizure({
     orgId, seizureId, settlementType,
     settlementAmount, downPayment,
-    buyerName, buyerPhone, buyerAddress,
+    buyerName, buyerPhone, buyerAddress, buyerCustomerId,
+    resalePrice, principalAmount, tenureMonths, monthlyInterestRate, startDate, guarantors,
     paymentMethod, userId
 }) {
     // ──────────────────────────────────────────────
@@ -184,25 +187,22 @@ async function settleSeizure({
                 }
             });
 
-            return { seizure: updatedSeizure, loanId: seizure.loanId };
-        });
-
-        // Record payment against old loan (outside transaction since paymentService has its own)
-        if (settlementAmount > 0) {
-            try {
+            // Record payment against old loan inside transaction context
+            if (settlementAmount > 0) {
                 const paymentService = require('./payment.service');
                 await paymentService.recordPayment({
                     orgId,
-                    loanId: result.loanId,
+                    loanId: seizure.loanId,
                     amount: settlementAmount,
                     paymentMethod: paymentMethod || 'cash',
                     referenceNumber: `Reclaim: Vehicle reclaimed by owner`,
-                    createdBy: userId
+                    createdBy: userId,
+                    tx
                 });
-            } catch (paymentErr) {
-                console.error('Failed to record reclaim payment:', paymentErr);
             }
-        }
+
+            return { seizure: updatedSeizure, loanId: seizure.loanId };
+        });
 
         await logAudit({
             orgId, userId,
@@ -216,7 +216,7 @@ async function settleSeizure({
     }
 
     // ──────────────────────────────────────────────
-    // PATH 2: SELL (Cash Sale)
+    // PATH 2: SELL (Outright Cash Sale)
     // ──────────────────────────────────────────────
     if (settlementType === 'sell') {
         const saleAmount = Number(settlementAmount || 0);
@@ -229,7 +229,13 @@ async function settleSeizure({
             if (!seizure) throw new Error('Seizure record not found');
 
             // Resolve buyer
-            const buyerCustomer = await resolveOrCreateBuyer(tx, orgId, buyerName, buyerPhone, buyerAddress);
+            let buyerCustomer = null;
+            if (buyerCustomerId) {
+                buyerCustomer = await tx.customer.findFirst({ where: { id: buyerCustomerId, orgId } });
+            }
+            if (!buyerCustomer) {
+                buyerCustomer = await resolveOrCreateBuyer(tx, orgId, buyerName, buyerPhone, buyerAddress);
+            }
             const newOwnerId = buyerCustomer ? buyerCustomer.id : seizure.vehicle.customerId;
 
             // Calculate loss: disbursed - total payments collected - sale amount
@@ -250,8 +256,8 @@ async function settleSeizure({
                     loanId: seizure.loanId,
                     saleAmount: new Prisma.Decimal(saleAmount),
                     saleType: 'sell',
-                    buyerName,
-                    buyerPhone,
+                    buyerName: buyerCustomer?.name || buyerName,
+                    buyerPhone: buyerCustomer?.phone || buyerPhone,
                     buyerCustomerId: buyerCustomer?.id || null,
                     paymentMethod: paymentMethod || 'cash',
                     createdBy: userId
@@ -264,7 +270,7 @@ async function settleSeizure({
                 data: { status: 'sold', customerId: newOwnerId }
             });
 
-            // Loan → written_off (dues stay untouched)
+            // Old Loan → written_off (dues stay untouched)
             await tx.loan.update({
                 where: { id: seizure.loanId, orgId },
                 data: { status: 'written_off' }
@@ -279,14 +285,75 @@ async function settleSeizure({
                     settlementAmount: new Prisma.Decimal(saleAmount),
                     lossAmount,
                     settledAt: new Date(),
-                    settledBy: buyerName || 'Buyer',
-                    buyerName,
-                    buyerPhone,
+                    settledBy: buyerCustomer?.name || buyerName || 'Buyer',
+                    buyerName: buyerCustomer?.name || buyerName,
+                    buyerPhone: buyerCustomer?.phone || buyerPhone,
                     buyerCustomerId: buyerCustomer?.id || null
                 }
             });
 
-            return { seizure: updatedSeizure, vehicleSale, buyerCustomer };
+            // Create settled loan record for buyer to maintain explicit purchase history
+            let createdLoan = null;
+            if (buyerCustomer && saleAmount > 0) {
+                const P = new Prisma.Decimal(saleAmount);
+                const newLoanId = uuidv4();
+                const now = new Date();
+
+                createdLoan = await tx.loan.create({
+                    data: {
+                        id: newLoanId,
+                        orgId,
+                        customerId: buyerCustomer.id,
+                        vehicleId: seizure.vehicleId,
+                        assignedStaffId: userId,
+                        principalAmount: P,
+                        tenureMonths: 1,
+                        monthlyInterestRate: new Prisma.Decimal(0),
+                        monthlyInterestAmount: new Prisma.Decimal(0),
+                        monthlyPrincipalAmount: P,
+                        monthlyDueAmount: P,
+                        startDate: now,
+                        nextDueDate: now,
+                        outstandingPrincipal: new Prisma.Decimal(0),
+                        accruedPenalty: new Prisma.Decimal(0),
+                        documentFee: new Prisma.Decimal(0),
+                        disbursedAmount: P,
+                        status: 'settled',
+                    }
+                });
+
+                await tx.loanDue.create({
+                    data: {
+                        id: uuidv4(),
+                        orgId,
+                        loanId: newLoanId,
+                        dueSequence: 1,
+                        dueDate: now,
+                        principalDue: P,
+                        interestDue: new Prisma.Decimal(0),
+                        penaltyDue: new Prisma.Decimal(0),
+                        amountPaid: P,
+                        totalDue: P,
+                        status: 'paid',
+                    }
+                });
+
+                await tx.payment.create({
+                    data: {
+                        id: uuidv4(),
+                        orgId,
+                        loanId: newLoanId,
+                        customerId: buyerCustomer.id,
+                        amount: P,
+                        paymentMethod: paymentMethod || 'cash',
+                        referenceNumber: `Outright Purchase - Vehicle ${seizure.vehicle.vehicleNumber || ''}`,
+                        paymentDate: now,
+                        createdBy: userId
+                    }
+                });
+            }
+
+            return { seizure: updatedSeizure, vehicleSale, buyerCustomer, loan: createdLoan };
         });
 
         await logAudit({
@@ -305,6 +372,11 @@ async function settleSeizure({
     // ──────────────────────────────────────────────
     if (settlementType === 'sell_with_finance') {
         const dpAmount = Number(downPayment || 0);
+        const resaleVal = Number(resalePrice || 0);
+        const pAmount = principalAmount ? Number(principalAmount) : Math.max(0, resaleVal - dpAmount);
+        const tenure = Number(tenureMonths || 12);
+        const rate = Number(monthlyInterestRate || 0.02);
+        const startD = startDate ? new Date(startDate) : new Date();
 
         const result = await prisma.$transaction(async (tx) => {
             const seizure = await tx.vehicleSeizure.findFirst({
@@ -314,7 +386,13 @@ async function settleSeizure({
             if (!seizure) throw new Error('Seizure record not found');
 
             // Resolve buyer
-            const buyerCustomer = await resolveOrCreateBuyer(tx, orgId, buyerName, buyerPhone, buyerAddress);
+            let buyerCustomer = null;
+            if (buyerCustomerId) {
+                buyerCustomer = await tx.customer.findFirst({ where: { id: buyerCustomerId, orgId } });
+            }
+            if (!buyerCustomer) {
+                buyerCustomer = await resolveOrCreateBuyer(tx, orgId, buyerName, buyerPhone, buyerAddress);
+            }
             if (!buyerCustomer) throw new Error('Buyer details are required for financed sale');
 
             // Calculate loss: disbursed - total payments collected - down payment
@@ -337,10 +415,10 @@ async function settleSeizure({
                         loanId: seizure.loanId,
                         saleAmount: new Prisma.Decimal(dpAmount),
                         saleType: 'sell_with_finance',
-                        buyerName,
-                        buyerPhone,
+                        buyerName: buyerCustomer.name,
+                        buyerPhone: buyerCustomer.phone,
                         buyerCustomerId: buyerCustomer.id,
-                        paymentMethod: 'cash',
+                        paymentMethod: paymentMethod || 'cash',
                         createdBy: userId
                     }
                 });
@@ -352,7 +430,7 @@ async function settleSeizure({
                 data: { status: 'active', customerId: buyerCustomer.id }
             });
 
-            // Loan → written_off (dues stay untouched)
+            // Old Loan → written_off (dues stay untouched)
             await tx.loan.update({
                 where: { id: seizure.loanId, orgId },
                 data: { status: 'written_off' }
@@ -367,14 +445,118 @@ async function settleSeizure({
                     settlementAmount: new Prisma.Decimal(dpAmount),
                     lossAmount,
                     settledAt: new Date(),
-                    settledBy: buyerName || 'Buyer',
-                    buyerName,
-                    buyerPhone,
+                    settledBy: buyerCustomer.name || 'Buyer',
+                    buyerName: buyerCustomer.name,
+                    buyerPhone: buyerCustomer.phone,
                     buyerCustomerId: buyerCustomer.id
                 }
             });
 
-            return { seizure: updatedSeizure, vehicleSale, buyerCustomer };
+            // Create New Loan for the buyer atomically!
+            const P = new Prisma.Decimal(pAmount);
+            const r = new Prisma.Decimal(rate);
+            const N = tenure;
+
+            const org = await tx.organization.findUnique({ where: { id: orgId } });
+            const settings = org?.settings || {};
+            const docFeePercent = new Prisma.Decimal(settings.documentFeePercent !== undefined ? settings.documentFeePercent : 0.05);
+            const documentFee = new Prisma.Decimal(P.times(docFeePercent).toFixed(2));
+            const newDisbursed = P.minus(documentFee);
+
+            const { monthlyPrincipal, monthlyInterest, dues } = generateSchedule(P, N, r, startD);
+            const monthlyDueAmount = monthlyPrincipal.plus(monthlyInterest);
+            const firstDueDate = addMonths(new Date(startD), 1);
+            const newLoanId = uuidv4();
+
+            const createdLoan = await tx.loan.create({
+                data: {
+                    id: newLoanId,
+                    orgId,
+                    customerId: buyerCustomer.id,
+                    vehicleId: seizure.vehicleId,
+                    assignedStaffId: userId,
+                    principalAmount: P,
+                    tenureMonths: N,
+                    monthlyInterestRate: r,
+                    monthlyInterestAmount: monthlyInterest,
+                    monthlyPrincipalAmount: monthlyPrincipal,
+                    monthlyDueAmount,
+                    startDate: new Date(startD),
+                    nextDueDate: firstDueDate,
+                    outstandingPrincipal: P,
+                    accruedPenalty: new Prisma.Decimal(0),
+                    documentFee,
+                    disbursedAmount: newDisbursed,
+                    status: 'active',
+                }
+            });
+
+            const loanDuesData = dues.map((due) => ({
+                id: uuidv4(),
+                orgId,
+                loanId: newLoanId,
+                dueSequence: due.dueSequence,
+                dueDate: due.dueDate,
+                principalDue: due.principalDue,
+                interestDue: due.interestDue,
+                penaltyDue: due.penaltyDue,
+                amountPaid: due.amountPaid,
+                totalDue: due.totalDue,
+                status: due.status,
+            }));
+            await tx.loanDue.createMany({ data: loanDuesData });
+
+            await tx.callTask.create({
+                data: {
+                    id: uuidv4(),
+                    orgId,
+                    loanId: newLoanId,
+                    assignedStaffId: userId,
+                    nextCallDate: firstDueDate,
+                }
+            });
+
+            // Process guarantors
+            if (guarantors && Array.isArray(guarantors)) {
+                for (const g of guarantors) {
+                    if (g && g.name && g.name.trim()) {
+                        let gCustId = g.customerId;
+                        if (!gCustId && g.phone) {
+                            const existingG = await tx.customer.findFirst({
+                                where: { orgId, phone: g.phone }
+                            });
+                            if (existingG) {
+                                gCustId = existingG.id;
+                            } else {
+                                const newGCust = await tx.customer.create({
+                                    data: {
+                                        id: uuidv4(),
+                                        orgId,
+                                        name: g.name.trim(),
+                                        phone: g.phone || '',
+                                        address: g.address || ''
+                                    }
+                                });
+                                gCustId = newGCust.id;
+                            }
+                        }
+                        await tx.guarantor.create({
+                            data: {
+                                id: uuidv4(),
+                                orgId,
+                                loanId: newLoanId,
+                                customerId: gCustId || null,
+                                name: g.name.trim(),
+                                phone: g.phone || null,
+                                aadharNumber: g.aadharNumber || null,
+                                address: g.address || null
+                            }
+                        });
+                    }
+                }
+            }
+
+            return { seizure: updatedSeizure, vehicleSale, buyerCustomer, loan: createdLoan };
         });
 
         await logAudit({
@@ -382,7 +564,7 @@ async function settleSeizure({
             action: 'vehicle_seizure_settled',
             entityType: 'vehicle_seizure',
             entityId: seizureId,
-            details: { settlementType: 'sell_with_finance', downPayment: dpAmount, buyerName, lossAmount: Number(result.seizure.lossAmount) }
+            details: { settlementType: 'sell_with_finance', downPayment: dpAmount, buyerName: result.buyerCustomer.name, lossAmount: Number(result.seizure.lossAmount) }
         });
 
         return result;

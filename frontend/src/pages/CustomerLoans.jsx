@@ -55,8 +55,13 @@ const getStatusBadge = (status) => {
     }
 };
 
-const getOverallStanding = (loansList) => {
-    if (!loansList || loansList.length === 0) return { label: 'No History', color: 'badge-neutral' };
+const getOverallStanding = (loansList, vehiclesList) => {
+    if ((!loansList || loansList.length === 0) && (!vehiclesList || vehiclesList.length === 0)) {
+        return { label: 'No History', color: 'badge-neutral' };
+    }
+    if (!loansList || loansList.length === 0) {
+        return { label: 'Vehicle Owner', color: 'badge-success' };
+    }
     
     const hasDefaulter = loansList.some(l => l.status === 'defaulter');
     if (hasDefaulter) return { label: 'Defaulter', color: 'badge-defaulter' };
@@ -70,6 +75,9 @@ const getOverallStanding = (loansList) => {
 
     const hasActive = loansList.some(l => l.status === 'active');
     if (hasActive) return { label: 'Good Standing', color: 'badge-success' };
+
+    const hasSettled = loansList.some(l => ['closed', 'completed', 'settled'].includes(l.status?.toLowerCase()));
+    if (hasSettled) return { label: 'Settled', color: 'badge-success' };
 
     return { label: 'Closed', color: 'badge-neutral' };
 };
@@ -198,7 +206,7 @@ export default function CustomerLoans() {
     const activeLoans = loans.filter(l => l.status === 'active' || l.status === 'defaulter');
     const closedLoansCount = loans.filter(l => ['closed', 'completed', 'settled'].includes(l.status?.toLowerCase())).length;
 
-    const standing = getOverallStanding(loans);
+    const standing = getOverallStanding(loans, customer?.vehicles);
 
     // Dynamic WhatsApp url
     const formattedPhone = customer.phone.replace(/\D/g, '');
