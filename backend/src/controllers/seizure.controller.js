@@ -26,8 +26,8 @@ async function seizeVehicle(req, res, next) {
 
 async function getSeizedInventory(req, res, next) {
     try {
-        const { status } = req.query;
-        const inventory = await seizureService.getSeizedInventory(req.orgId, { status });
+        const { status, page, limit } = req.query;
+        const inventory = await seizureService.getSeizedInventory(req.orgId, { status, page, limit });
         res.json(inventory);
     } catch (err) {
         next(err);
@@ -85,7 +85,8 @@ async function settleSeizure(req, res, next) {
 
 async function getVehicleSales(req, res, next) {
     try {
-        const sales = await seizureService.getVehicleSales(req.orgId);
+        const { page, limit } = req.query;
+        const sales = await seizureService.getVehicleSales(req.orgId, { page, limit });
         res.json(sales);
     } catch (err) {
         next(err);

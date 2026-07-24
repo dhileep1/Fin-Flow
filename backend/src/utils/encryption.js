@@ -5,9 +5,21 @@ const logger = require('./logger');
 const ALGORITHM = 'aes-256-cbc';
 const IV_LENGTH = 16;
 
-let key = config.encryptionKey || 'dev-encryption-key-32-chars-long';
+// SEC-6: Fail fast on invalid key length — never silently pad or truncate
+const rawKey = config.encryptionKey || '';
+if (config.nodeEnv === 'production' && rawKey.length !== 32) {
+    throw new Error(
+        `FATAL: ENCRYPTION_KEY must be exactly 32 characters. Got ${rawKey.length}. ` +
+        'Set a proper 32-character key in your environment.'
+    );
+}
+// In development, allow dev fallback but warn
+let key = rawKey;
 if (key.length < 32) {
-    key = key.padEnd(32, 'x');
+    if (config.nodeEnv !== 'test') {
+        logger.warn(`[Encryption] Key is ${key.length} chars (need 32). Using padded dev key. THIS IS NOT SAFE FOR PRODUCTION.`);
+    }
+    key = key.padEnd(32, '0');
 } else if (key.length > 32) {
     key = key.slice(0, 32);
 }
@@ -23,8 +35,9 @@ function encrypt(text) {
         encrypted += cipher.final('hex');
         return iv.toString('hex') + ':' + encrypted;
     } catch (e) {
-        logger.error('Encryption failed', { error: e.message, stack: e.stack });
-        return text;
+        // SEC-6: Never return plaintext on encryption failure
+        logger.error('Encryption failed — refusing to store plaintext', { error: e.message, stack: e.stack });
+        throw new Error('Encryption failed. Cannot store sensitive data in plaintext.');
     }
 }
 

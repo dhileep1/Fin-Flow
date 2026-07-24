@@ -12,6 +12,12 @@ async function login(req, res, next) {
             return res.status(400).json({ error: 'Email/phone and password are required' });
         }
 
+        // SEC-3: Validate that orgId references a real organization
+        const org = await prisma.organization.findUnique({ where: { id: orgId } });
+        if (!org) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
         const where = { orgId };
         if (email) where.email = email.trim().toLowerCase();
         else where.phone = phone.trim();

@@ -94,7 +94,6 @@ const seizeVehicleSchema = z.object({
     }),
 });
 
-
 // Guarantor Schema (Sub-object)
 const guarantorSubSchema = z.object({
     name: z.string().min(1, "Guarantor name is required"),
@@ -102,6 +101,41 @@ const guarantorSubSchema = z.object({
     aadharNumber: z.string().optional().nullable(),
     address: z.string().optional().nullable(),
     photoUrl: z.string().optional().nullable(),
+});
+
+// MOD-5: Settlement validation schema
+const settleSeizureSchema = z.object({
+    body: z.object({
+        settlementType: z.enum(['reclaim', 'sell', 'sell_with_finance'], {
+            errorMap: () => ({ message: "Settlement type must be 'reclaim', 'sell', or 'sell_with_finance'" })
+        }),
+        settlementAmount: z.number().nonnegative('Settlement amount cannot be negative').optional(),
+        downPayment: z.number().nonnegative('Down payment cannot be negative').optional(),
+        buyerName: z.string().optional().nullable(),
+        buyerPhone: z.string().optional().nullable(),
+        buyerAddress: z.string().optional().nullable(),
+        buyerCustomerId: uuidSchema.optional().nullable(),
+        resalePrice: z.number().nonnegative().optional(),
+        principalAmount: z.number().positive().optional(),
+        tenureMonths: z.number().int().positive().optional(),
+        monthlyInterestRate: z.number().nonnegative().max(0.05).optional(),
+        startDate: dateStringSchema.optional(),
+        guarantors: z.array(guarantorSubSchema).optional(),
+        paymentMethod: z.enum(['cash', 'upi', 'bank', 'cheque', 'card']).optional(),
+    }),
+});
+
+// SEC-8: Admin user creation schema
+const createUserSchema = z.object({
+    body: z.object({
+        name: z.string().min(1, 'Name is required'),
+        phone: z.string().optional().nullable(),
+        email: z.string().email('Invalid email format').optional().nullable(),
+        password: z.string().min(8, 'Password must be at least 8 characters'),
+        role: z.enum(['admin', 'accountant', 'staff', 'viewer'], {
+            errorMap: () => ({ message: "Role must be admin, accountant, staff, or viewer" })
+        }),
+    }),
 });
 
 // Loan schemas
@@ -193,6 +227,8 @@ module.exports = {
     createVehicleSchema,
     updateVehicleSchema,
     seizeVehicleSchema,
+    settleSeizureSchema,
+    createUserSchema,
     createLoanSchema,
     forecloseLoanSchema,
     createPaymentSchema,

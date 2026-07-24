@@ -5,7 +5,14 @@ const { v4: uuidv4 } = require('uuid');
 const prisma = new PrismaClient();
 
 async function main() {
+    // MOD-8: Safety guard — refuse to seed production databases
+    if (process.env.NODE_ENV === 'production') {
+        console.error('⛔ REFUSING TO SEED PRODUCTION DATABASE. Set NODE_ENV to development or test.');
+        process.exit(1);
+    }
+
     console.log('🌱 Seeding database...');
+    console.log('⚠️  WARNING: Seed uses demo passwords (admin123, staff123). DO NOT use in production.');
 
     // Create organization
     const orgId = uuidv4();

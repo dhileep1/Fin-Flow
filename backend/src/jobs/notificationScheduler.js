@@ -36,13 +36,15 @@ async function runNotificationScheduler() {
             const customer = due.loan.customer;
             if (customer.optOutWhatsapp) continue;
 
-            // Check if notification was already sent today for this due
+            // Check if notification was already sent today for this specific due
             const existing = await prisma.notification.findFirst({
                 where: {
                     loanId: due.loanId,
                     customerId: customer.id,
                     type: 'reminder',
                     createdAt: { gte: today },
+                    // MOD-7: Per-due dedup — include due sequence in message to differentiate
+                    messageBody: { contains: `due on ${new Date(due.dueDate).toLocaleDateString('en-IN')}` },
                 },
             });
 

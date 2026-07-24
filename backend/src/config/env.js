@@ -50,3 +50,12 @@ module.exports = {
   currencySymbol: process.env.CURRENCY_SYMBOL || '₹',
   currencyLocale: process.env.CURRENCY_LOCALE || 'en-IN',
 };
+
+// MOD-11: Warn if production CORS origins use plain HTTP
+if (process.env.NODE_ENV === 'production' && process.env.CORS_ALLOWED_ORIGINS) {
+    const origins = process.env.CORS_ALLOWED_ORIGINS.split(',');
+    const httpOrigins = origins.filter(o => o.trim().startsWith('http://') && !o.includes('localhost'));
+    if (httpOrigins.length > 0) {
+        console.warn(`[SECURITY WARNING] Production CORS origins using plain HTTP: ${httpOrigins.join(', ')}. Consider using HTTPS.`);
+    }
+}

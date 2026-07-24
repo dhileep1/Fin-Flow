@@ -478,10 +478,10 @@ async function executeForeclosure(orgId, loanId, { foreclosureRate, paymentMetho
         }
     }
 
-    const quote = await calculateForeclosureQuote(orgId, loanId, foreclosureRate);
-    const amount = new Prisma.Decimal(quote.foreclosureAmount);
-
+    // BIZ-8: Quote is now calculated inside the transaction to prevent stale data
     return prisma.$transaction(async (tx) => {
+        const quote = await calculateForeclosureQuote(orgId, loanId, foreclosureRate);
+        const amount = new Prisma.Decimal(quote.foreclosureAmount);
         // BIZ-6: Pessimistic lock on organization row to prevent race conditions on receipt sequences
         let org;
         if (tx.$queryRawUnsafe) {

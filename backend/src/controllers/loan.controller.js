@@ -47,6 +47,10 @@ async function createLoan(req, res, next) {
             for (const g of guarantors) {
                 let customerId = g.customerId;
 
+                // BIZ-7: Normalize Aadhaar consistently — strip whitespace once, encrypt once
+                const normalizedAadhar = g.aadharNumber ? g.aadharNumber.replace(/[\s-]/g, '') : null;
+                const encryptedAadhar = normalizedAadhar ? encrypt(normalizedAadhar) : null;
+
                 // If customerId is not provided, check by phone or create new customer
                 if (!customerId && g.phone) {
                     const existingCustomer = await prisma.customer.findFirst({
@@ -63,7 +67,7 @@ async function createLoan(req, res, next) {
                                 orgId: req.orgId,
                                 name: g.name,
                                 phone: g.phone,
-                                aadharNumber: g.aadharNumber ? encrypt(g.aadharNumber.replace(/\s/g, '')) : null,
+                                aadharNumber: encryptedAadhar,
                                 address: g.address,
                             }
                         });
@@ -79,7 +83,7 @@ async function createLoan(req, res, next) {
                         customerId: customerId || null,
                         name: g.name,
                         phone: g.phone,
-                        aadharNumber: g.aadharNumber ? encrypt(g.aadharNumber) : null,
+                        aadharNumber: encryptedAadhar,
                         address: g.address,
                         photoUrl: g.photoUrl,
                     },

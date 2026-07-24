@@ -179,15 +179,22 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
         const newOutstanding = new Prisma.Decimal(loanRecord.outstandingPrincipal).minus(totalPrincipalPaid);
 
         // Check if loan should be closed
-        const unpaidDues = await tx.loanDue.count({
+        const unpaidDues = await tx.loanDue.findMany({
             where: { loanId, status: { not: 'paid' } },
+            orderBy: { dueDate: 'asc' },
+            take: 1,
         });
+        const unpaidCount = unpaidDues.length;
+
+        // BIZ-2: Update nextDueDate to earliest unpaid due date
+        const nextDueDate = unpaidDues.length > 0 ? unpaidDues[0].dueDate : null;
 
         await tx.loan.update({
             where: { id: loanId },
             data: {
                 outstandingPrincipal: Prisma.Decimal.max(0, newOutstanding),
-                status: unpaidDues === 0 && newOutstanding.lessThanOrEqualTo(0) ? 'closed' : 'active',
+                status: unpaidCount === 0 && newOutstanding.lessThanOrEqualTo(0) ? 'closed' : 'active',
+                nextDueDate,
             },
         });
 

@@ -12,12 +12,24 @@ async function runCallTaskRefresher() {
         today.setHours(0, 0, 0, 0);
 
         // 1. Mark dues with dueDate < today and not paid as 'overdue'
+        //    BIZ-10: Only mark as overdue if no partial payment — partially-paid stay 'pending'
         const overdueUpdate = await prisma.loanDue.updateMany({
             where: {
                 status: { in: ['upcoming', 'pending'] },
-                dueDate: { lt: today }
+                dueDate: { lt: today },
+                amountPaid: { lte: 0 }
             },
             data: { status: 'overdue' }
+        });
+
+        // Mark partially-paid past-due as 'pending' (not overdue) so they remain actionable
+        const partialPaidUpdate = await prisma.loanDue.updateMany({
+            where: {
+                status: 'upcoming',
+                dueDate: { lt: today },
+                amountPaid: { gt: 0 }
+            },
+            data: { status: 'pending' }
         });
 
         // 2. Mark dues with dueDate === today and status === 'upcoming' as 'pending'

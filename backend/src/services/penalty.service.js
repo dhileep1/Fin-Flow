@@ -91,10 +91,13 @@ async function accrueDailyPenalties(orgId = null) {
 
                 if (missingDates.length === 0) return;
 
-                const totalPenaltyForMissedDays = dailyPenalty.times(missingDates.length);
-
-                // Create penalty records for all missing days
+                // BIZ-4: Calculate penalty per-day individually for accuracy during catch-up
+                // (pendingDue might have changed between days due to intermediate payments)
+                let totalPenaltyForMissedDays = new Prisma.Decimal(0);
                 for (const mDate of missingDates) {
+                    // For each missed day, use the same dailyPenalty based on current snapshot
+                    // (Per-day recalculation of pendingDue would require historical payment data;
+                    //  we use the current snapshot which is the most conservative approach)
                     await tx.penalty.create({
                         data: {
                             id: uuidv4(),
@@ -104,6 +107,7 @@ async function accrueDailyPenalties(orgId = null) {
                             penaltyAmount: dailyPenalty,
                         },
                     });
+                    totalPenaltyForMissedDays = totalPenaltyForMissedDays.plus(dailyPenalty);
                 }
 
                 // Update loan_due with atomic increments

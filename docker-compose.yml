@@ -1,14 +1,12 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:15-alpine
     container_name: lend-easy-db
     restart: always
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: lend_easy
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-lend_easy}
     ports:
       - "5432:5432"
     volumes:
@@ -29,13 +27,18 @@ services:
     restart: always
     ports:
       - "5000:5000"
+    env_file:
+      - .env.production
     environment:
       NODE_ENV: production
       PORT: 5000
-      DATABASE_URL: postgresql://postgres:password@postgres:5432/lend_easy?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?err}@postgres:5432/${POSTGRES_DB:-lend_easy}?schema=public
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: production-super-secret-key-12345
-      CORS_ALLOWED_ORIGINS: "http://localhost"
+      # SECURITY: JWT_SECRET, ENCRYPTION_KEY, and other secrets must be
+      # provided via .env.production or Docker secrets. Never hardcode them.
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env.production}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env.production}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://yourdomain.com}
     depends_on:
       - postgres
       - redis

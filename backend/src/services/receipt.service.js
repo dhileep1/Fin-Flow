@@ -23,6 +23,7 @@ function formatCurrency(amount) {
 
 async function uploadReceiptToS3(receiptId, pdfBuffer) {
     if (!s3Client || !env.s3BucketName) {
+        logger.info(`[S3 Mock] Mock uploading receipt ${receiptId} (S3 bucket or credentials not set)`);
         console.log(`[S3 Mock] Mock uploading receipt ${receiptId} (S3 bucket or credentials not set)`);
         return `https://s3.amazonaws.com/mock-bucket/receipts/${receiptId}.pdf`;
     }
@@ -187,6 +188,7 @@ async function generateReceiptPDF(paymentId) {
 
 async function deleteReceiptFromS3(receiptId) {
     if (!s3Client || !env.s3BucketName) {
+        logger.info(`[S3 Mock] Mock deleting receipt ${receiptId} (S3 bucket or credentials not set)`);
         console.log(`[S3 Mock] Mock deleting receipt ${receiptId} (S3 bucket or credentials not set)`);
         return;
     }

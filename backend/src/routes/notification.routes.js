@@ -12,6 +12,23 @@ const router = express.Router({ mergeParams: true });
 // PUBLIC Webhook callback (bypasses auth and tenant scope for Twilio callbacks)
 router.post('/webhook', async (req, res, next) => {
     try {
+        // SEC-4: Verify Twilio webhook signature when using Twilio provider
+        const env = require('../config/env');
+        if (env.whatsappProvider === 'twilio' && env.twilioAuthToken) {
+            const twilioLib = require('twilio');
+            const signature = req.headers['x-twilio-signature'];
+            const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+            const isValid = twilioLib.validateRequest(
+                env.twilioAuthToken,
+                signature || '',
+                url,
+                req.body || {}
+            );
+            if (!isValid) {
+                return res.status(403).json({ error: 'Invalid webhook signature' });
+            }
+        }
+
         const { MessageSid, MessageStatus, SmsStatus, SmsSid } = req.body;
         const sid = MessageSid || SmsSid;
         const status = MessageStatus || SmsStatus;

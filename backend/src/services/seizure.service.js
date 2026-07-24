@@ -60,7 +60,7 @@ async function seizeVehicle({ orgId, loanId, vehicleId, userId, yardLocation, no
  * Fetch repossessed vehicle inventory for an organization.
  * Filters vehicles with status "seized" or "sold".
  */
-async function getSeizedInventory(orgId, { status } = {}) {
+async function getSeizedInventory(orgId, { status, page, limit } = {}) {
     const where = {
         orgId,
         status: { in: ['seized', 'sold'] }
@@ -74,7 +74,7 @@ async function getSeizedInventory(orgId, { status } = {}) {
         };
     }
 
-    return prisma.vehicle.findMany({
+    const queryOptions = {
         where,
         include: {
             customer: {
@@ -97,7 +97,16 @@ async function getSeizedInventory(orgId, { status } = {}) {
             }
         },
         orderBy: { createdAt: 'desc' }
-    });
+    };
+
+    if (page && limit) {
+        const take = Math.min(parseInt(limit, 10) || 50, 100);
+        const skip = (Math.max(parseInt(page, 10) || 1, 1) - 1) * take;
+        queryOptions.take = take;
+        queryOptions.skip = skip;
+    }
+
+    return prisma.vehicle.findMany(queryOptions);
 }
 
 
@@ -163,6 +172,11 @@ async function settleSeizure({
             });
             if (!seizure) throw new Error('Seizure record not found');
 
+            // BIZ-5: Validate seizure status — must be 'in_yard' to settle
+            if (seizure.status !== 'in_yard') {
+                throw new Error(`Seizure has already been settled (status: ${seizure.status})`);
+            }
+
             // Vehicle → active
             await tx.vehicle.update({
                 where: { id: seizure.vehicleId, orgId },
@@ -227,6 +241,11 @@ async function settleSeizure({
                 include: { vehicle: true, loan: true }
             });
             if (!seizure) throw new Error('Seizure record not found');
+
+            // BIZ-5: Validate seizure status
+            if (seizure.status !== 'in_yard') {
+                throw new Error(`Seizure has already been settled (status: ${seizure.status})`);
+            }
 
             // Resolve buyer
             let buyerCustomer = null;
@@ -338,12 +357,12 @@ async function settleSeizure({
                     }
                 });
 
+                // BIZ-9: Removed invalid customerId field (not in Payment model)
                 await tx.payment.create({
                     data: {
                         id: uuidv4(),
                         orgId,
                         loanId: newLoanId,
-                        customerId: buyerCustomer.id,
                         amount: P,
                         paymentMethod: paymentMethod || 'cash',
                         referenceNumber: `Outright Purchase - Vehicle ${seizure.vehicle.vehicleNumber || ''}`,
@@ -384,6 +403,11 @@ async function settleSeizure({
                 include: { vehicle: true, loan: true }
             });
             if (!seizure) throw new Error('Seizure record not found');
+
+            // BIZ-5: Validate seizure status
+            if (seizure.status !== 'in_yard') {
+                throw new Error(`Seizure has already been settled (status: ${seizure.status})`);
+            }
 
             // Resolve buyer
             let buyerCustomer = null;
@@ -576,8 +600,8 @@ async function settleSeizure({
 /**
  * Get all vehicle sales for an organization (for the Transactions page).
  */
-async function getVehicleSales(orgId) {
-    return prisma.vehicleSale.findMany({
+async function getVehicleSales(orgId, { page, limit } = {}) {
+    const queryOptions = {
         where: { orgId },
         include: {
             vehicle: { select: { id: true, vehicleNumber: true, model: true } },
@@ -586,7 +610,16 @@ async function getVehicleSales(orgId) {
             creator: { select: { id: true, name: true } }
         },
         orderBy: { saleDate: 'desc' }
-    });
+    };
+
+    if (page && limit) {
+        const take = Math.min(parseInt(limit, 10) || 50, 100);
+        const skip = (Math.max(parseInt(page, 10) || 1, 1) - 1) * take;
+        queryOptions.take = take;
+        queryOptions.skip = skip;
+    }
+
+    return prisma.vehicleSale.findMany(queryOptions);
 }
 
 module.exports = {

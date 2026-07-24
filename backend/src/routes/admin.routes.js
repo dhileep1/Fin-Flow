@@ -5,7 +5,11 @@ const { requireRole } = require('../middleware/rbac');
 const prisma = require('../config/database');
 const bcrypt = require('bcrypt');
 const { encrypt, decrypt } = require('../utils/encryption');
+const logger = require('../utils/logger');
 const router = express.Router({ mergeParams: true });
+
+// SEC-8: Allowed roles — prevents privilege escalation via super_admin injection
+const ALLOWED_ROLES = ['admin', 'accountant', 'staff', 'viewer'];
 
 router.use(authenticate, tenantScope);
 
@@ -90,6 +94,18 @@ router.get('/users', requireRole('admin'), async (req, res, next) => {
 router.post('/users', requireRole('admin'), async (req, res, next) => {
     try {
         const { name, phone, email, password, role } = req.body;
+
+        // SEC-8: Validate role to prevent privilege escalation
+        if (!role || !ALLOWED_ROLES.includes(role)) {
+            return res.status(400).json({ error: `Invalid role. Allowed: ${ALLOWED_ROLES.join(', ')}` });
+        }
+        if (!password || password.length < 8) {
+            return res.status(400).json({ error: 'Password must be at least 8 characters' });
+        }
+        if (!name || !name.trim()) {
+            return res.status(400).json({ error: 'Name is required' });
+        }
+
         const passwordHash = await bcrypt.hash(password, 12);
         const user = await prisma.user.create({
             data: { orgId: req.orgId, name, phone, email, passwordHash, role },
@@ -101,6 +117,15 @@ router.post('/users', requireRole('admin'), async (req, res, next) => {
 router.put('/users/:id', requireRole('admin'), async (req, res, next) => {
     try {
         const { name, phone, email, role, status, password } = req.body;
+
+        // SEC-8: Validate role if being updated
+        if (role && !ALLOWED_ROLES.includes(role)) {
+            return res.status(400).json({ error: `Invalid role. Allowed: ${ALLOWED_ROLES.join(', ')}` });
+        }
+        if (password && password.length < 8) {
+            return res.status(400).json({ error: 'Password must be at least 8 characters' });
+        }
+
         const data = { name, phone, email, role, status };
         if (password) data.passwordHash = await bcrypt.hash(password, 12);
         await prisma.user.updateMany({
@@ -426,7 +451,7 @@ router.post('/audit-logs/:id/revert', requireRole('admin'), async (req, res, nex
             const receiptService = require('../services/receipt.service');
             for (const r of receipts) {
                 await receiptService.deleteReceiptFromS3(r.id).catch(err => {
-                    console.error(`Failed to delete receipt ${r.id} from S3:`, err);
+                    logger.error(`Failed to delete receipt ${r.id} from S3:`, { error: err.message });
                 });
             }
 
@@ -444,7 +469,7 @@ router.post('/audit-logs/:id/revert', requireRole('admin'), async (req, res, nex
                     type: 'manual',
                     messageBody: `Dear ${loan.customer.name}, your payment of ₹${Number(payment.amount).toFixed(2)} recorded on ${new Date(payment.paymentDate).toLocaleDateString('en-IN')} has been reverted.`
                 }).catch(err => {
-                    console.error('Failed to send payment reversal notification:', err);
+                    logger.error('Failed to send payment reversal notification:', { error: err.message });
                 });
             }
 

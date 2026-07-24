@@ -19,6 +19,7 @@ class WhatsAppProvider {
             if (env.whatsappProvider === 'twilio' && !twilioClient) {
                 logger.warn('[WhatsApp] Twilio credentials missing, falling back to mock provider');
             }
+            logger.info(`[WhatsApp Mock] Sending to ${to}: ${body}${mediaUrl ? ` [media: ${mediaUrl}]` : ''}`);
             console.log(`[WhatsApp Mock] Sending to ${to}: ${body}${mediaUrl ? ` [media: ${mediaUrl}]` : ''}`);
             return {
                 success: true,

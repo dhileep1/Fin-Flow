@@ -3,7 +3,7 @@ const { authenticate } = require('../middleware/auth');
 const { tenantScope } = require('../middleware/tenantScope');
 const { requireRole } = require('../middleware/rbac');
 const validate = require('../middleware/validate');
-const { seizeVehicleSchema } = require('../utils/validation.schemas');
+const { seizeVehicleSchema, settleSeizureSchema } = require('../utils/validation.schemas');
 const { seizeVehicle, getSeizedInventory, settleSeizure, getVehicleSales } = require('../controllers/seizure.controller');
 
 const router = express.Router({ mergeParams: true });
@@ -14,6 +14,7 @@ router.post('/', requireRole('admin', 'accountant'), validate(seizeVehicleSchema
 router.get('/inventory', getSeizedInventory);
 router.get('/sales', getVehicleSales);
 
-router.post('/:id/settle', requireRole('admin', 'accountant'), settleSeizure);
+// MOD-5: Added validation middleware for settlement body
+router.post('/:id/settle', requireRole('admin', 'accountant'), validate(settleSeizureSchema), settleSeizure);
 
 module.exports = router;

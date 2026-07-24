@@ -51,6 +51,15 @@ async function getPayments(req, res, next) {
 
 async function getReceipt(req, res, next) {
     try {
+        // SEC-7: Verify payment belongs to this org before generating PDF
+        const prisma = require('../config/database');
+        const payment = await prisma.payment.findFirst({
+            where: { id: req.params.paymentId, orgId: req.orgId }
+        });
+        if (!payment) {
+            return res.status(404).json({ error: 'Payment not found' });
+        }
+
         const pdfBuffer = await receiptService.generateReceiptPDF(req.params.paymentId);
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `inline; filename=receipt-${req.params.paymentId}.pdf`);

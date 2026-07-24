@@ -5,6 +5,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const config = require('./config/env');
 const { errorHandler } = require('./middleware/errorHandler');
+const requestId = require('./middleware/requestId');
 const { startWorkers, stopWorkers } = require('./jobs/worker');
 const prisma = require('./config/database');
 const Redis = require('ioredis');
@@ -18,10 +19,13 @@ app.use(cors({ origin: config.corsAllowedOrigins, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Rate limiting configurations
+// ARCH-1: Attach request ID for correlation tracking
+app.use(requestId);
+
+// MOD-12: Reasonable rate limits — 1000 req/15min in production (was 100)
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: config.nodeEnv === 'development' ? 10000 : 100, // Limit each IP to 100 requests per window
+    max: config.nodeEnv === 'development' ? 10000 : 1000,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests from this IP, please try again after 15 minutes.' }
@@ -29,7 +33,7 @@ const globalLimiter = rateLimit({
 
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: config.nodeEnv === 'development' ? 1000 : 10, // Limit each IP to 10 login attempts per window
+    max: config.nodeEnv === 'development' ? 1000 : 20,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many login attempts from this IP, please try again after 15 minutes.' }
@@ -48,21 +52,34 @@ async function checkDbHealth() {
     }
 }
 
-async function checkRedisHealth() {
-    return new Promise((resolve) => {
-        const client = new Redis(config.redisUrl, {
-            connectTimeout: 1000,
-            maxRetriesPerRequest: 1
+// MOD-13: Reuse a single Redis client for health checks instead of creating one each time
+let healthRedisClient = null;
+function getHealthRedisClient() {
+    if (!healthRedisClient || healthRedisClient.status === 'end') {
+        healthRedisClient = new Redis(config.redisUrl, {
+            connectTimeout: 2000,
+            maxRetriesPerRequest: 1,
+            lazyConnect: true,
+            enableReadyCheck: false,
         });
-        client.ping()
-            .then(() => {
-                client.disconnect();
-                resolve('healthy');
-            })
-            .catch((err) => {
-                resolve(`unhealthy: ${err.message}`);
-            });
-    });
+        healthRedisClient.on('error', () => {
+            // Suppress connection errors for health check client
+        });
+    }
+    return healthRedisClient;
+}
+
+async function checkRedisHealth() {
+    try {
+        const client = getHealthRedisClient();
+        if (client.status !== 'ready') {
+            await client.connect();
+        }
+        await client.ping();
+        return 'healthy';
+    } catch (err) {
+        return `unhealthy: ${err.message}`;
+    }
 }
 
 // --- Health check ---
@@ -135,6 +152,13 @@ async function gracefulShutdown(signal) {
         logger.error('Error stopping background workers:', err);
     }
 
+    // Close health check Redis client
+    if (healthRedisClient) {
+        try {
+            await healthRedisClient.quit();
+        } catch (e) { /* ignore */ }
+    }
+
     // Close database connections
     try {
         await prisma.$disconnect();
@@ -151,4 +175,3 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 module.exports = app;
-
