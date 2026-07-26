@@ -15,6 +15,7 @@ model Organization {
   settings  Json     @default("{}")
   status    String   @default("active")
   createdAt DateTime @default(now()) @map("created_at")
+  lastReceiptSeq Int @default(0) @map("last_receipt_seq")
 
   users         User[]
   customers     Customer[]
@@ -70,6 +71,7 @@ model Customer {
   aadharNumber String? @map("aadhar_number")
   photoUrl    String?  @map("photo_url")
   optOutWhatsapp Boolean @default(false) @map("opt_out_whatsapp")
+  aadharHash  String?  @map("aadhar_hash")
   createdAt   DateTime @default(now()) @map("created_at")
 
   org           Organization   @relation(fields: [orgId], references: [id])
@@ -116,10 +118,11 @@ model Guarantor {
   aadharNumber String? @map("aadhar_number")
   address     String?
   photoUrl    String?  @map("photo_url")
+  aadharHash  String?  @map("aadhar_hash")
   createdAt   DateTime @default(now()) @map("created_at")
 
   org      Organization @relation(fields: [orgId], references: [id])
-  loan     Loan         @relation(fields: [loanId], references: [id])
+  loan     Loan         @relation(fields: [loanId], references: [id], onDelete: Cascade)
   customer Customer?    @relation("CustomerGuarantor", fields: [customerId], references: [id])
 
   @@index([loanId])
@@ -182,7 +185,7 @@ model LoanDue {
   createdAt    DateTime @default(now()) @map("created_at")
 
   org       Organization @relation(fields: [orgId], references: [id])
-  loan      Loan         @relation(fields: [loanId], references: [id])
+  loan      Loan         @relation(fields: [loanId], references: [id], onDelete: Cascade)
   penalties Penalty[]
   payments  Payment[]
 
@@ -200,7 +203,7 @@ model Penalty {
   createdAt     DateTime @default(now()) @map("created_at")
 
   org     Organization @relation(fields: [orgId], references: [id])
-  loanDue LoanDue      @relation(fields: [loanDueId], references: [id])
+  loanDue LoanDue      @relation(fields: [loanDueId], references: [id], onDelete: Cascade)
 
   @@unique([loanDueId, penaltyDate], map: "ux_penalties_loan_due_date")
   @@map("penalties")
@@ -221,8 +224,8 @@ model Payment {
   idempotencyKey  String?  @map("idempotency_key")
 
   org      Organization @relation(fields: [orgId], references: [id])
-  loan     Loan         @relation(fields: [loanId], references: [id])
-  loanDue  LoanDue?     @relation(fields: [loanDueId], references: [id])
+  loan     Loan         @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  loanDue  LoanDue?     @relation(fields: [loanDueId], references: [id], onDelete: Cascade)
   creator  User?        @relation("PaymentCreator", fields: [createdBy], references: [id])
   receipts Receipt[]
 
@@ -242,7 +245,7 @@ model Receipt {
   createdAt     DateTime @default(now()) @map("created_at")
 
   org     Organization @relation(fields: [orgId], references: [id])
-  payment Payment      @relation(fields: [paymentId], references: [id])
+  payment Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 
   @@unique([orgId, receiptNumber], map: "ux_receipts_org_number")
   @@map("receipts")
@@ -258,14 +261,16 @@ model Notification {
   messageBody      String?  @map("message_body")
   status           String   @default("pending") // pending, sent, failed
   providerMessageId String? @map("provider_message_id")
+  referenceId      String?  @map("reference_id")
   sentAt           DateTime? @map("sent_at")
   createdAt        DateTime @default(now()) @map("created_at")
 
   org      Organization @relation(fields: [orgId], references: [id])
-  customer Customer?    @relation(fields: [customerId], references: [id])
-  loan     Loan?        @relation(fields: [loanId], references: [id])
+  customer Customer?    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  loan     Loan?        @relation(fields: [loanId], references: [id], onDelete: Cascade)
 
   @@index([orgId, status])
+  @@unique([orgId, type, referenceId], map: "ux_notifications_dedup")
   @@map("notifications")
 }
 
@@ -281,7 +286,7 @@ model CallTask {
   updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
 
   org           Organization @relation(fields: [orgId], references: [id])
-  loan          Loan         @relation(fields: [loanId], references: [id])
+  loan          Loan         @relation(fields: [loanId], references: [id], onDelete: Cascade)
   assignedStaff User?        @relation("AssignedTaskStaff", fields: [assignedStaffId], references: [id])
   callLogs      CallLog[]
 
@@ -300,7 +305,7 @@ model CallLog {
   promisedPaymentDate  DateTime? @map("promised_payment_date") @db.Date
   nextFollowupDate     DateTime? @map("next_followup_date") @db.Date
 
-  callTask CallTask @relation(fields: [callTaskId], references: [id])
+  callTask CallTask @relation(fields: [callTaskId], references: [id], onDelete: Cascade)
   user     User?    @relation(fields: [userId], references: [id])
 
   @@index([callTaskId])
@@ -363,7 +368,7 @@ model VehicleSeizure {
 
   org             Organization @relation(fields: [orgId], references: [id])
   vehicle         Vehicle      @relation(fields: [vehicleId], references: [id])
-  loan            Loan         @relation(fields: [loanId], references: [id])
+  loan            Loan         @relation(fields: [loanId], references: [id], onDelete: Cascade)
   user            User         @relation("SeizureExecutor", fields: [seizedBy], references: [id])
   vehicleSales    VehicleSale[]
 
@@ -391,9 +396,9 @@ model VehicleSale {
   createdAt       DateTime @default(now()) @map("created_at")
 
   org       Organization   @relation(fields: [orgId], references: [id])
-  seizure   VehicleSeizure @relation(fields: [seizureId], references: [id])
+  seizure   VehicleSeizure @relation(fields: [seizureId], references: [id], onDelete: Cascade)
   vehicle   Vehicle        @relation(fields: [vehicleId], references: [id])
-  loan      Loan           @relation(fields: [loanId], references: [id])
+  loan      Loan           @relation(fields: [loanId], references: [id], onDelete: Cascade)
   creator   User?          @relation("VehicleSaleCreator", fields: [createdBy], references: [id])
 
   @@index([orgId])

@@ -43,12 +43,15 @@ async function accrueDailyPenalties(orgId = null) {
 
                 if (!currentDue || currentDue.status === 'paid') return;
 
-                // Non-compounding: pending = (principalDue + interestDue) - amountPaid
+                // Non-compounding: pending = (principalDue + interestDue) - max(0, amountPaid - penaltyDue)
                 const principal = new Prisma.Decimal(currentDue.principalDue);
                 const interest = new Prisma.Decimal(currentDue.interestDue);
                 const amountPaid = new Prisma.Decimal(currentDue.amountPaid);
+                const penaltyDue = new Prisma.Decimal(currentDue.penaltyDue || 0);
+                
                 const baseDue = principal.plus(interest);
-                const pendingDue = Prisma.Decimal.max(0, baseDue.minus(amountPaid));
+                const amountPaidForBase = Prisma.Decimal.max(0, amountPaid.minus(penaltyDue));
+                const pendingDue = Prisma.Decimal.max(0, baseDue.minus(amountPaidForBase));
 
                 if (pendingDue.lessThanOrEqualTo(0)) return;
 

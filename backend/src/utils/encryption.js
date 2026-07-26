@@ -58,4 +58,14 @@ function decrypt(text) {
     }
 }
 
-module.exports = { encrypt, decrypt };
+function generateHash(text) {
+    if (!text) return text;
+    try {
+        return crypto.createHmac('sha256', keyBuffer).update(text, 'utf8').digest('hex');
+    } catch (e) {
+        logger.error('Hashing failed', { error: e.message, stack: e.stack });
+        return null;
+    }
+}
+
+module.exports = { encrypt, decrypt, generateHash };

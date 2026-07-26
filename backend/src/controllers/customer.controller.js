@@ -1,6 +1,5 @@
 const prisma = require('../config/database');
 const { logAudit } = require('../services/audit.service');
-const { encrypt, decrypt } = require('../utils/encryption');
 
 async function listCustomers(req, res, next) {
     try {
@@ -54,16 +53,7 @@ async function listCustomers(req, res, next) {
             prisma.customer.count({ where }),
         ]);
 
-        const decryptedCustomers = customers.map(c => ({
-            ...c,
-            aadharNumber: decrypt(c.aadharNumber),
-            guarantorInstances: c.guarantorInstances.map(g => ({
-                ...g,
-                aadharNumber: decrypt(g.aadharNumber)
-            }))
-        }));
-
-        res.json({ customers: decryptedCustomers, total, page: Number(page), limit: Number(limit), totalPages: Math.ceil(total / Number(limit)) });
+        res.json({ customers, total, page: Number(page), limit: Number(limit), totalPages: Math.ceil(total / Number(limit)) });
     } catch (err) {
         next(err);
     }
@@ -85,8 +75,6 @@ async function getCustomer(req, res, next) {
         });
         if (!customer) return res.status(404).json({ error: 'Customer not found' });
         
-        customer.aadharNumber = decrypt(customer.aadharNumber);
-        
         res.json(customer);
     } catch (err) {
         next(err);
@@ -100,8 +88,6 @@ async function createCustomer(req, res, next) {
             return res.status(400).json({ error: 'Name and phone are required' });
         }
 
-        const encryptedAadhar = encrypt(aadharNumber);
-
         const customer = await prisma.customer.create({
             data: {
                 orgId: req.orgId,
@@ -109,7 +95,7 @@ async function createCustomer(req, res, next) {
                 phone,
                 altPhone: altPhone || [],
                 address,
-                aadharNumber: encryptedAadhar,
+                aadharNumber: aadharNumber,
                 photoUrl,
             },
         });
@@ -119,10 +105,7 @@ async function createCustomer(req, res, next) {
             action: 'customer_created', entityType: 'customer', entityId: customer.id,
         });
 
-        res.status(201).json({
-            ...customer,
-            aadharNumber: decrypt(customer.aadharNumber)
-        });
+        res.status(201).json(customer);
     } catch (err) {
         next(err);
     }
@@ -137,13 +120,10 @@ async function updateCustomer(req, res, next) {
         });
         if (!oldCustomer) return res.status(404).json({ error: 'Customer not found' });
 
-        const encryptedAadhar = aadharNumber !== undefined ? encrypt(aadharNumber) : undefined;
-
-        const customer = await prisma.customer.updateMany({
-            where: { id: req.params.id, orgId: req.orgId },
-            data: { name, phone, altPhone, address, aadharNumber: encryptedAadhar, photoUrl, optOutWhatsapp },
+        const updated = await prisma.customer.update({
+            where: { id: req.params.id },
+            data: { name, phone, altPhone, address, aadharNumber, photoUrl, optOutWhatsapp },
         });
-        if (customer.count === 0) return res.status(404).json({ error: 'Customer not found' });
 
         await logAudit({
             orgId: req.orgId,
@@ -157,7 +137,7 @@ async function updateCustomer(req, res, next) {
                     phone: oldCustomer.phone,
                     altPhone: oldCustomer.altPhone,
                     address: oldCustomer.address,
-                    aadharNumber: decrypt(oldCustomer.aadharNumber),
+                    aadharNumber: oldCustomer.aadharNumber,
                     photoUrl: oldCustomer.photoUrl,
                     optOutWhatsapp: oldCustomer.optOutWhatsapp
                 },
@@ -165,8 +145,6 @@ async function updateCustomer(req, res, next) {
             }
         });
 
-        const updated = await prisma.customer.findUnique({ where: { id: req.params.id } });
-        updated.aadharNumber = decrypt(updated.aadharNumber);
         res.json(updated);
     } catch (err) {
         next(err);

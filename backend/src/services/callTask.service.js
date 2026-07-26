@@ -118,28 +118,14 @@ async function getCallQueue(orgId, { assignedStaffId, dueBefore, page = 1, limit
         const paidDues = paidMap[task.loanId] || 0;
         const totalDues = task.loan._count.loanDues;
 
-        // Default follow-up date: earliest due date if never called, otherwise nextCallDate
-        const followUpDate = task.lastCallDate ? task.nextCallDate : (earliestOverdueDue?.dueDate || task.nextCallDate);
-
         return {
             ...task,
-            nextCallDate: followUpDate,
             daysOverdue,
             overdueCount,
             paidDues,
             totalDues,
             outstandingPrincipal: Number(task.loan.outstandingPrincipal),
         };
-    });
-
-    // Sort by priority: next_call_date ASC (already), then days_overdue DESC, outstanding DESC
-    enriched.sort((a, b) => {
-        const dateA = a.nextCallDate ? new Date(a.nextCallDate).getTime() : Infinity;
-        const dateB = b.nextCallDate ? new Date(b.nextCallDate).getTime() : Infinity;
-        if (dateA !== dateB) return dateA - dateB;
-        if (b.daysOverdue !== a.daysOverdue) return b.daysOverdue - a.daysOverdue;
-        if (b.outstandingPrincipal !== a.outstandingPrincipal) return b.outstandingPrincipal - a.outstandingPrincipal;
-        return 0;
     });
 
     return { tasks: enriched, total, page, limit, totalPages: Math.ceil(total / limit) };

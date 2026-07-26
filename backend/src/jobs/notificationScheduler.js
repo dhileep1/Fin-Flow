@@ -37,14 +37,14 @@ async function runNotificationScheduler() {
             if (customer.optOutWhatsapp) continue;
 
             // Check if notification was already sent today for this specific due
-            const existing = await prisma.notification.findFirst({
+            const referenceId = `reminder_${due.id}_${today.getTime()}`; // unique per due per day
+            const existing = await prisma.notification.findUnique({
                 where: {
-                    loanId: due.loanId,
-                    customerId: customer.id,
-                    type: 'reminder',
-                    createdAt: { gte: today },
-                    // MOD-7: Per-due dedup — include due sequence in message to differentiate
-                    messageBody: { contains: `due on ${new Date(due.dueDate).toLocaleDateString('en-IN')}` },
+                    orgId_type_referenceId: {
+                        orgId: due.orgId,
+                        type: 'reminder',
+                        referenceId,
+                    },
                 },
             });
 
@@ -55,6 +55,7 @@ async function runNotificationScheduler() {
                 customerId: customer.id,
                 loanId: due.loanId,
                 type: 'reminder',
+                referenceId,
                 messageBody: `Dear ${customer.name}, your EMI of ₹${Number(due.totalDue).toFixed(2)} is due on ${new Date(due.dueDate).toLocaleDateString('en-IN')}. Please pay on time to avoid penalties. - ${due.loan.org?.name || 'Lend Easy'}`
             });
             enqueued++;

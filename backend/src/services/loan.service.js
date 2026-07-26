@@ -79,7 +79,7 @@ function generateSchedule(principalAmount, tenureMonths, monthlyInterestRate, st
 /**
  * Create a new loan with full schedule generation.
  */
-async function createLoan({ orgId, customerId, vehicleId, assignedStaffId, principalAmount, tenureMonths, monthlyInterestRate, startDate, userId, disbursedAmountOverride }) {
+async function createLoan({ orgId, customerId, vehicleId, assignedStaffId, principalAmount, tenureMonths, monthlyInterestRate, startDate, userId, disbursedAmountOverride, guarantors }) {
     const P = new Prisma.Decimal(principalAmount);
     const r = new Prisma.Decimal(monthlyInterestRate);
     const N = tenureMonths;
@@ -171,6 +171,54 @@ async function createLoan({ orgId, customerId, vehicleId, assignedStaffId, princ
                 nextCallDate: firstDueDate,
             },
         });
+
+        // Add guarantors if provided
+        if (guarantors && Array.isArray(guarantors) && guarantors.length > 0) {
+            for (const g of guarantors) {
+                let gCustomerId = g.customerId;
+
+                // BIZ-7: Normalize Aadhaar consistently
+                const normalizedAadhar = g.aadharNumber ? g.aadharNumber.replace(/[\s-]/g, '') : null;
+
+                // If customerId is not provided, check by phone or create new customer
+                if (!gCustomerId && g.phone) {
+                    const existingCustomer = await tx.customer.findFirst({
+                        where: {
+                            orgId,
+                            phone: g.phone
+                        }
+                    });
+                    if (existingCustomer) {
+                        gCustomerId = existingCustomer.id;
+                    } else if (g.name) {
+                        const newCustomer = await tx.customer.create({
+                            data: {
+                                orgId,
+                                name: g.name,
+                                phone: g.phone,
+                                aadharNumber: normalizedAadhar,
+                                address: g.address,
+                            }
+                        });
+                        gCustomerId = newCustomer.id;
+                    }
+                }
+
+                await tx.guarantor.create({
+                    data: {
+                        id: uuidv4(),
+                        orgId,
+                        loanId,
+                        customerId: gCustomerId || null,
+                        name: g.name,
+                        phone: g.phone,
+                        aadharNumber: normalizedAadhar,
+                        address: g.address,
+                        photoUrl: g.photoUrl,
+                    },
+                });
+            }
+        }
 
         return loan;
     });

@@ -4,7 +4,6 @@ const { tenantScope } = require('../middleware/tenantScope');
 const { requireRole } = require('../middleware/rbac');
 const prisma = require('../config/database');
 const bcrypt = require('bcrypt');
-const { encrypt, decrypt } = require('../utils/encryption');
 const logger = require('../utils/logger');
 const router = express.Router({ mergeParams: true });
 
@@ -296,13 +295,6 @@ router.post('/audit-logs/:id/revert', requireRole('admin'), async (req, res, nex
             }
 
             await prisma.$transaction(async (tx) => {
-                const tasks = await tx.callTask.findMany({ where: { loanId, orgId: req.orgId } });
-                const taskIds = tasks.map(t => t.id);
-                await tx.callLog.deleteMany({ where: { callTaskId: { in: taskIds } } });
-                await tx.callTask.deleteMany({ where: { loanId, orgId: req.orgId } });
-
-                await tx.loanDue.deleteMany({ where: { loanId, orgId: req.orgId } });
-                await tx.guarantor.deleteMany({ where: { loanId, orgId: req.orgId } });
                 await tx.loan.delete({ where: { id: loanId } });
             });
 
@@ -432,18 +424,19 @@ router.post('/audit-logs/:id/revert', requireRole('admin'), async (req, res, nex
                 }
 
                 const totalPrincipal = allocationDetails.reduce((sum, a) => sum + (Number(a.principal) || 0), 0);
+                const totalPenalty = allocationDetails.reduce((sum, a) => sum + (Number(a.penalty) || 0), 0);
                 const loan = await tx.loan.findUnique({ where: { id: loanId } });
                 if (loan) {
                     await tx.loan.update({
                         where: { id: loanId },
                         data: {
                             outstandingPrincipal: Number(loan.outstandingPrincipal) + totalPrincipal,
+                            accruedPenalty: Number(loan.accruedPenalty) + totalPenalty,
                             status: 'active'
                         }
                     });
                 }
 
-                await tx.receipt.deleteMany({ where: { paymentId, orgId: req.orgId } });
                 await tx.payment.delete({ where: { id: paymentId } });
             });
 
@@ -615,7 +608,6 @@ router.get('/audit-logs/entity/:entityType/:entityId', requireRole('admin'), asy
                 where: { id: entityId, orgId: req.orgId }
             });
             if (!customer) return res.status(404).json({ error: 'Customer not found' });
-            customer.aadharNumber = decrypt(customer.aadharNumber);
             return res.json(customer);
         }
 
@@ -672,11 +664,14 @@ router.put('/audit-logs/entity/:entityType/:entityId', requireRole('admin'), asy
             });
             if (!existing) return res.status(404).json({ error: 'Customer not found' });
 
-            const encryptedAadhar = aadharNumber !== undefined ? encrypt(aadharNumber) : undefined;
+            const dataToUpdate = { name, phone, altPhone, address, photoUrl, optOutWhatsapp };
+            if (aadharNumber && !aadharNumber.includes('XXXX')) {
+                dataToUpdate.aadharNumber = aadharNumber;
+            }
 
             const updated = await prisma.customer.update({
                 where: { id: entityId },
-                data: { name, phone, altPhone, address, aadharNumber: encryptedAadhar, photoUrl, optOutWhatsapp }
+                data: dataToUpdate
             });
 
             const { logAudit } = require('../services/audit.service');
@@ -694,7 +689,7 @@ router.put('/audit-logs/entity/:entityType/:entityId', requireRole('admin'), asy
                         phone: existing.phone,
                         altPhone: existing.altPhone,
                         address: existing.address,
-                        aadharNumber: maskAadhar(decrypt(existing.aadharNumber)),
+                        aadharNumber: maskAadhar(existing.aadharNumber),
                         photoUrl: existing.photoUrl,
                         optOutWhatsapp: existing.optOutWhatsapp
                     },
@@ -703,7 +698,7 @@ router.put('/audit-logs/entity/:entityType/:entityId', requireRole('admin'), asy
                         phone, 
                         altPhone, 
                         address, 
-                        aadharNumber: maskAadhar(aadharNumber), 
+                        aadharNumber: dataToUpdate.aadharNumber ? maskAadhar(dataToUpdate.aadharNumber) : maskAadhar(existing.aadharNumber), 
                         photoUrl, 
                         optOutWhatsapp 
                     },
@@ -711,10 +706,7 @@ router.put('/audit-logs/entity/:entityType/:entityId', requireRole('admin'), asy
                 }
             });
 
-            return res.json({
-                ...updated,
-                aadharNumber: decrypt(updated.aadharNumber)
-            });
+            return res.json(updated);
         }
 
         if (entityType === 'loan') {

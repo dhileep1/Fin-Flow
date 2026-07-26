@@ -358,9 +358,10 @@ async function settleSeizure({
                 });
 
                 // BIZ-9: Removed invalid customerId field (not in Payment model)
+                const paymentId = uuidv4();
                 await tx.payment.create({
                     data: {
-                        id: uuidv4(),
+                        id: paymentId,
                         orgId,
                         loanId: newLoanId,
                         amount: P,
@@ -368,6 +369,45 @@ async function settleSeizure({
                         referenceNumber: `Outright Purchase - Vehicle ${seizure.vehicle.vehicleNumber || ''}`,
                         paymentDate: now,
                         createdBy: userId
+                    }
+                });
+
+                // Generate receipt for this outright sale payment
+                let org;
+                if (tx.$queryRawUnsafe) {
+                    const orgs = await tx.$queryRawUnsafe(
+                        'SELECT * FROM organizations WHERE id = $1::uuid FOR UPDATE',
+                        orgId
+                    );
+                    org = orgs[0];
+                } else if (tx.organization) {
+                    org = await tx.organization.findUnique({
+                        where: { id: orgId }
+                    });
+                }
+                const settings = org?.settings || {};
+                const lastSeq = settings.lastReceiptSequence !== undefined ? Number(settings.lastReceiptSequence) : 0;
+                const nextSeq = lastSeq + 1;
+                await tx.organization.update({
+                    where: { id: orgId },
+                    data: {
+                        settings: {
+                            ...settings,
+                            lastReceiptSequence: nextSeq
+                        }
+                    }
+                });
+
+                const shortOrgCode = org.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase().padEnd(3, 'X');
+                const paddedSeq = String(nextSeq).padStart(6, '0');
+                const receiptNumber = `RCP-${shortOrgCode}-${paddedSeq}`;
+
+                await tx.receipt.create({
+                    data: {
+                        id: uuidv4(),
+                        orgId,
+                        paymentId,
+                        receiptNumber
                     }
                 });
             }

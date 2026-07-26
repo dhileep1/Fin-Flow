@@ -1,22 +1,6 @@
 const loanService = require('../services/loan.service');
 const prisma = require('../config/database');
 const { logAudit } = require('../services/audit.service');
-const { encrypt, decrypt } = require('../utils/encryption');
-const { v4: uuidv4 } = require('uuid');
-
-function decryptLoan(loan) {
-    if (!loan) return loan;
-    if (loan.customer) {
-        loan.customer.aadharNumber = decrypt(loan.customer.aadharNumber);
-    }
-    if (loan.guarantors) {
-        loan.guarantors = loan.guarantors.map(g => ({
-            ...g,
-            aadharNumber: decrypt(g.aadharNumber)
-        }));
-    }
-    return loan;
-}
 
 async function createLoan(req, res, next) {
     try {
@@ -40,60 +24,10 @@ async function createLoan(req, res, next) {
             monthlyInterestRate,
             startDate,
             userId: req.user.id,
+            guarantors,
         });
 
-        // Add guarantors if provided
-        if (guarantors && Array.isArray(guarantors) && guarantors.length > 0) {
-            for (const g of guarantors) {
-                let customerId = g.customerId;
-
-                // BIZ-7: Normalize Aadhaar consistently — strip whitespace once, encrypt once
-                const normalizedAadhar = g.aadharNumber ? g.aadharNumber.replace(/[\s-]/g, '') : null;
-                const encryptedAadhar = normalizedAadhar ? encrypt(normalizedAadhar) : null;
-
-                // If customerId is not provided, check by phone or create new customer
-                if (!customerId && g.phone) {
-                    const existingCustomer = await prisma.customer.findFirst({
-                        where: {
-                            orgId: req.orgId,
-                            phone: g.phone
-                        }
-                    });
-                    if (existingCustomer) {
-                        customerId = existingCustomer.id;
-                    } else if (g.name) {
-                        const newCustomer = await prisma.customer.create({
-                            data: {
-                                orgId: req.orgId,
-                                name: g.name,
-                                phone: g.phone,
-                                aadharNumber: encryptedAadhar,
-                                address: g.address,
-                            }
-                        });
-                        customerId = newCustomer.id;
-                    }
-                }
-
-                await prisma.guarantor.create({
-                    data: {
-                        id: uuidv4(),
-                        orgId: req.orgId,
-                        loanId: loan.id,
-                        customerId: customerId || null,
-                        name: g.name,
-                        phone: g.phone,
-                        aadharNumber: encryptedAadhar,
-                        address: g.address,
-                        photoUrl: g.photoUrl,
-                    },
-                });
-            }
-        }
-
-        // Re-fetch with guarantors
-        const fullLoan = await loanService.getLoanById(req.orgId, loan.id);
-        res.status(201).json(decryptLoan(fullLoan));
+        res.status(201).json(loan);
     } catch (err) {
         next(err);
     }
@@ -103,7 +37,7 @@ async function getLoan(req, res, next) {
     try {
         const loan = await loanService.getLoanById(req.orgId, req.params.id);
         if (!loan) return res.status(404).json({ error: 'Loan not found' });
-        res.json(decryptLoan(loan));
+        res.json(loan);
     } catch (err) {
         next(err);
     }
@@ -122,13 +56,6 @@ async function listLoans(req, res, next) {
             type,
         });
         
-        result.loans = result.loans.map(loan => {
-            if (loan.customer) {
-                loan.customer.aadharNumber = decrypt(loan.customer.aadharNumber);
-            }
-            return loan;
-        });
-
         res.json(result);
     } catch (err) {
         next(err);
@@ -167,14 +94,7 @@ async function getDues(req, res, next) {
             prisma.loanDue.count({ where }),
         ]);
 
-        const decryptedDues = dues.map(d => {
-            if (d.loan && d.loan.customer) {
-                d.loan.customer.aadharNumber = decrypt(d.loan.customer.aadharNumber);
-            }
-            return d;
-        });
-
-        res.json({ dues: decryptedDues, total, page: Number(page), limit: Number(limit) });
+        res.json({ dues: dues, total, page: Number(page), limit: Number(limit) });
     } catch (err) {
         next(err);
     }
@@ -187,8 +107,8 @@ async function getForeclosureQuote(req, res, next) {
             return res.status(400).json({ error: 'foreclosureRate is required' });
         }
         const rate = Number(foreclosureRate);
-        if (isNaN(rate) || rate < 0) {
-            return res.status(400).json({ error: 'foreclosureRate must be a positive number' });
+        if (isNaN(rate) || rate < 0 || rate > 1) {
+            return res.status(400).json({ error: 'foreclosureRate must be a positive number up to 1 (100%)' });
         }
 
         const quote = await loanService.calculateForeclosureQuote(req.orgId, req.params.id, rate);
@@ -205,8 +125,8 @@ async function forecloseLoan(req, res, next) {
             return res.status(400).json({ error: 'foreclosureRate is required' });
         }
         const rate = Number(foreclosureRate);
-        if (isNaN(rate) || rate < 0) {
-            return res.status(400).json({ error: 'foreclosureRate must be a positive number' });
+        if (isNaN(rate) || rate < 0 || rate > 1) {
+            return res.status(400).json({ error: 'foreclosureRate must be a positive number up to 1 (100%)' });
         }
 
         const result = await loanService.executeForeclosure(req.orgId, req.params.id, {
@@ -217,7 +137,7 @@ async function forecloseLoan(req, res, next) {
             paymentDate
         });
 
-        res.json(decryptLoan(result));
+        res.json(result);
     } catch (err) {
         next(err);
     }
@@ -226,7 +146,7 @@ async function forecloseLoan(req, res, next) {
 async function closeLoan(req, res, next) {
     try {
         const result = await loanService.closeLoan(req.orgId, req.params.id, req.user.id);
-        res.json(decryptLoan(result));
+        res.json(result);
     } catch (err) {
         next(err);
     }

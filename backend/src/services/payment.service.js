@@ -39,13 +39,7 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
     let result;
     try {
         const runTransactionWork = async (tx) => {
-            // BIZ-6: Pessimistic lock on organization row to prevent race conditions on receipt sequences
-            if (tx.$queryRawUnsafe) {
-                await tx.$queryRawUnsafe(
-                    'SELECT 1 FROM organizations WHERE id = $1::uuid FOR UPDATE',
-                    orgId
-                );
-            }
+            // Removed BIZ-6 Pessimistic lock on organization to prevent deadlocks and blocking
 
             // BIZ-2 / BIZ-10: Validate loan status is active
             const loan = await tx.loan.findUnique({
@@ -164,10 +158,10 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
             allocationDetails.push({
                 loanDueId: allocation.loanDueId,
                 dueSequence: allocation.dueSequence,
-                penalty: allocation.penalty.toNumber(),
-                interest: allocation.interest.toNumber(),
-                principal: allocation.principal.toNumber(),
-                total: allocation.total.toNumber(),
+                penalty: allocation.penalty,
+                interest: allocation.interest,
+                principal: allocation.principal,
+                total: allocation.total,
             });
         }
 
@@ -205,7 +199,7 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
                 id: paymentId,
                 orgId,
                 loanId,
-                amount: paymentAmount.toNumber(),
+                amount: paymentAmount,
                 paymentMethod,
                 referenceNumber,
                 allocationDetails: allocationDetails,
@@ -215,38 +209,17 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
             },
         });
 
-        let nextSeq = (settings.lastReceiptSequence !== undefined ? Number(settings.lastReceiptSequence) : 0) + 1;
-        let receiptNumber;
-        let exists = true;
-        const shortOrgCode = org.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase().padEnd(3, 'X');
-
-        while (exists) {
-            const paddedSeq = String(nextSeq).padStart(6, '0');
-            receiptNumber = `RCP-${shortOrgCode}-${paddedSeq}`;
-
-            let existingReceipt = null;
-            if (tx.receipt.findFirst) {
-                existingReceipt = await tx.receipt.findFirst({
-                    where: { orgId, receiptNumber }
-                });
-            }
-            
-            if (!existingReceipt) {
-                exists = false;
-            } else {
-                nextSeq++;
-            }
-        }
-
-        await tx.organization.update({
+        const updatedOrg = await tx.organization.update({
             where: { id: orgId },
             data: {
-                settings: {
-                    ...settings,
-                    lastReceiptSequence: nextSeq
-                }
+                lastReceiptSeq: { increment: 1 }
             }
         });
+
+        const nextSeq = updatedOrg.lastReceiptSeq;
+        const shortOrgCode = org.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase().padEnd(3, 'X');
+        const paddedSeq = String(nextSeq).padStart(6, '0');
+        const receiptNumber = `RCP-${shortOrgCode}-${paddedSeq}`;
 
         const receipt = await tx.receipt.create({
             data: {
@@ -257,7 +230,7 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
             },
         });
 
-        return { payment, receipt, allocationDetails, creditBalance: remaining.toNumber(), customerId: loan.customerId };
+        return { payment, receipt, allocationDetails, creditBalance: remaining, customerId: loan.customerId };
         };
 
         if (externalTx) {
@@ -266,7 +239,7 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
             result = await prisma.$transaction(runTransactionWork);
         }
     } catch (err) {
-        if (err.code === 'P2002' && idempotencyKey) {
+        if (err.code === 'P2002' && idempotencyKey && err.meta?.target?.includes('ux_payments_org_idempotency')) {
             const existing = await prisma.payment.findFirst({
                 where: { orgId, idempotencyKey },
                 include: { receipts: true }

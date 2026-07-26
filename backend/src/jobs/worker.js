@@ -1,6 +1,7 @@
 const { Queue, Worker } = require('bullmq');
 const Redis = require('ioredis');
 const config = require('../config/env');
+const prisma = require('../config/database');
 const { runPenaltyJob } = require('./penaltyJob');
 const { runNotificationScheduler } = require('./notificationScheduler');
 const { runCallTaskRefresher } = require('./callTaskRefresher');
@@ -103,50 +104,78 @@ function clearFallbackIntervals() {
     }
 }
 
+async function withAdvisoryLock(lockKey, callback) {
+    try {
+        // Simple hash to convert string key to integer for Postgres advisory lock
+        const lockId = String(lockKey).split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        await prisma.$transaction(async (tx) => {
+            const result = await tx.$queryRaw`SELECT pg_try_advisory_xact_lock(${lockId})`;
+            const acquired = result[0]?.pg_try_advisory_xact_lock;
+            if (acquired) {
+                await callback();
+            } else {
+                logger.debug(`[Workers Fallback] Could not acquire lock for ${lockKey}, skipping execution.`);
+            }
+        });
+    } catch (err) {
+        logger.error(`[Workers Fallback] Lock error for ${lockKey}`, { message: err.message });
+    }
+}
+
 function startIntervalFallback() {
     if (fallbackTimerIds.length > 0) return; // already running
 
     logger.info('[Workers Fallback] Starting simple setInterval scheduler...');
 
     // Run penalty job daily
-    fallbackTimerIds.push(setTimeout(async () => {
-        try {
-            await runPenaltyJob();
-        } catch (err) {
-            logger.error('[Workers Fallback] Penalty job failed', { message: err.message, stack: err.stack });
-        }
+    fallbackTimerIds.push(setTimeout(() => {
+        withAdvisoryLock('penalty-job', async () => {
+            try {
+                await runPenaltyJob();
+            } catch (err) {
+                logger.error('[Workers Fallback] Penalty job failed', { message: err.message, stack: err.stack });
+            }
+        });
     }, 5000));
-    fallbackTimerIds.push(setInterval(async () => {
-        try {
-            await runPenaltyJob();
-        } catch (err) {
-            logger.error('[Workers Fallback] Penalty job failed', { message: err.message, stack: err.stack });
-        }
+    fallbackTimerIds.push(setInterval(() => {
+        withAdvisoryLock('penalty-job', async () => {
+            try {
+                await runPenaltyJob();
+            } catch (err) {
+                logger.error('[Workers Fallback] Penalty job failed', { message: err.message, stack: err.stack });
+            }
+        });
     }, 24 * 60 * 60 * 1000));
 
     // Run call task refresher daily
-    fallbackTimerIds.push(setTimeout(async () => {
-        try {
-            await runCallTaskRefresher();
-        } catch (err) {
-            logger.error('[Workers Fallback] Call task refresher failed', { message: err.message, stack: err.stack });
-        }
+    fallbackTimerIds.push(setTimeout(() => {
+        withAdvisoryLock('call-task-refresher', async () => {
+            try {
+                await runCallTaskRefresher();
+            } catch (err) {
+                logger.error('[Workers Fallback] Call task refresher failed', { message: err.message, stack: err.stack });
+            }
+        });
     }, 10000));
-    fallbackTimerIds.push(setInterval(async () => {
-        try {
-            await runCallTaskRefresher();
-        } catch (err) {
-            logger.error('[Workers Fallback] Call task refresher failed', { message: err.message, stack: err.stack });
-        }
+    fallbackTimerIds.push(setInterval(() => {
+        withAdvisoryLock('call-task-refresher', async () => {
+            try {
+                await runCallTaskRefresher();
+            } catch (err) {
+                logger.error('[Workers Fallback] Call task refresher failed', { message: err.message, stack: err.stack });
+            }
+        });
     }, 24 * 60 * 60 * 1000));
 
     // Run notification scheduler every 5 minutes
-    fallbackTimerIds.push(setInterval(async () => {
-        try {
-            await runNotificationScheduler();
-        } catch (err) {
-            logger.error('[Workers Fallback] Notification scheduler failed', { message: err.message, stack: err.stack });
-        }
+    fallbackTimerIds.push(setInterval(() => {
+        withAdvisoryLock('notification-scheduler', async () => {
+            try {
+                await runNotificationScheduler();
+            } catch (err) {
+                logger.error('[Workers Fallback] Notification scheduler failed', { message: err.message, stack: err.stack });
+            }
+        });
     }, 5 * 60 * 1000));
 
     logger.info('[Workers Fallback] Simple scheduler initiated');

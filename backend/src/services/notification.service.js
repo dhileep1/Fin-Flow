@@ -90,7 +90,7 @@ function renderTemplate(template, data) {
 /**
  * Send a notification (WhatsApp).
  */
-async function sendNotification({ orgId, customerId, loanId, type, messageBody, mediaUrl }) {
+async function sendNotification({ orgId, customerId, loanId, type, messageBody, mediaUrl, referenceId }) {
     // Check opt-out
     if (customerId) {
         const customer = await prisma.customer.findUnique({ where: { id: customerId } });
@@ -110,6 +110,7 @@ async function sendNotification({ orgId, customerId, loanId, type, messageBody, 
             loanId,
             type,
             messageBody,
+            referenceId,
             status: 'pending',
         },
     });
