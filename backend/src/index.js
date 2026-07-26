@@ -99,6 +99,11 @@ app.get('/api/health', async (req, res) => {
 });
 
 // --- API Routes ---
+
+// Super-Admin Control Plane (isolated from tenant routes)
+app.use('/api/v1/super-admin', require('./routes/superAdmin.routes'));
+
+// Tenant API Routes
 const API_PREFIX = '/api/v1/:orgId';
 
 app.use(`${API_PREFIX}/auth/login`, authLimiter);

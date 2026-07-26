@@ -199,11 +199,28 @@ async function main() {
     }
     console.log(`✅ ${loanConfigs.length} loans with schedules, call tasks, and guarantors created`);
 
+    // ─── Super-Admin User ───────────────────────────────────
+    const superAdminHash = await bcrypt.hash('superadmin123', 12);
+    const superAdmin = await prisma.superAdminUser.upsert({
+        where: { email: 'superadmin@finflow.io' },
+        update: {},
+        create: {
+            id: uuidv4(),
+            name: 'Platform Admin',
+            email: 'superadmin@finflow.io',
+            passwordHash: superAdminHash,
+            role: 'SUPER_ADMIN',
+            status: 'active',
+        },
+    });
+    console.log(`✅ Super-Admin user: ${superAdmin.email} / superadmin123`);
+
     console.log('\n🎉 Seed complete!\n');
     console.log('=== Login Credentials ===');
     console.log(`Org ID: ${orgId}`);
     console.log('Admin: admin@quickloans.com / admin123');
     console.log('Staff: ramesh@quickloans.com / staff123');
+    console.log('Super-Admin Portal: superadmin@finflow.io / superadmin123');
 }
 
 main()

@@ -17,6 +17,14 @@ import Collections from './pages/Collections';
 import VehicleInventory from './pages/VehicleInventory';
 import VehicleDetail from './pages/VehicleDetail';
 
+// Super-Admin imports
+import SuperAdminLogin from './pages/super-admin/SuperAdminLogin';
+import SuperAdminLayout from './components/super-admin/SuperAdminLayout';
+import SuperAdminDashboard from './pages/super-admin/SuperAdminDashboard';
+import TenantManager from './pages/super-admin/TenantManager';
+import SystemHealth from './pages/super-admin/SystemHealth';
+import QueueMonitor from './pages/super-admin/QueueMonitor';
+
 function ProtectedRoute({ children }) {
     const { isAuthenticated } = useAuth();
     if (!isAuthenticated) return <Navigate to="/login" replace />;
@@ -35,6 +43,7 @@ function RoleProtectedRoute({ children, allowedRoles }) {
 function AppRoutes() {
     return (
         <Routes>
+            {/* ═══ Tenant Routes ═══ */}
             <Route path="/login" element={<Login />} />
             <Route
                 path="/"
@@ -72,6 +81,16 @@ function AppRoutes() {
                     } 
                 />
             </Route>
+
+            {/* ═══ Super-Admin Routes ═══ */}
+            <Route path="/super-admin/login" element={<SuperAdminLogin />} />
+            <Route path="/super-admin" element={<SuperAdminLayout />}>
+                <Route index element={<SuperAdminDashboard />} />
+                <Route path="tenants" element={<TenantManager />} />
+                <Route path="system-health" element={<SystemHealth />} />
+                <Route path="queue-monitor" element={<QueueMonitor />} />
+            </Route>
+
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
     );

@@ -12,15 +12,62 @@ import {
     Bell,
     Menu,
     X,
-    HelpCircle
+    HelpCircle,
+    ArrowLeft,
+    Eye,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import '../styles/layout.css';
+
+/**
+ * Decode JWT payload without verification (for reading claims only).
+ */
+function decodeJwtPayload(token) {
+    try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const json = decodeURIComponent(
+            atob(base64).split('').map((c) =>
+                '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+            ).join('')
+        );
+        return JSON.parse(json);
+    } catch {
+        return null;
+    }
+}
 
 export default function Layout() {
     const { user } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
+
+    // Impersonation detection
+    const token = localStorage.getItem('lendEasyToken');
+    const tokenPayload = token ? decodeJwtPayload(token) : null;
+    const isImpersonated = tokenPayload?.isImpersonated === true;
+
+    const handleReturnToAdmin = () => {
+        // Restore the backed-up super-admin session
+        const backupToken = localStorage.getItem('superAdminBackupToken');
+        const backupUser = localStorage.getItem('superAdminBackupUser');
+
+        if (backupToken) {
+            // Restore super-admin credentials
+            localStorage.setItem('superAdminToken', backupToken);
+            if (backupUser) localStorage.setItem('superAdminUser', backupUser);
+
+            // Clean up tenant impersonation
+            localStorage.removeItem('lendEasyToken');
+            localStorage.removeItem('lendEasyOrgId');
+            localStorage.removeItem('lendEasyUser');
+            localStorage.removeItem('superAdminBackupToken');
+            localStorage.removeItem('superAdminBackupUser');
+
+            // Redirect to super-admin portal
+            window.location.href = '/super-admin';
+        }
+    };
 
     /* ── Sidebar collapse state ── */
     const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -158,7 +205,20 @@ export default function Layout() {
         : 'var(--sidebar-expanded)';
 
     return (
-        <div className="app-wrapper">
+        <div className={`app-wrapper ${isImpersonated ? 'has-impersonation-banner' : ''}`}>
+            {/* ═══ IMPERSONATION BANNER ═══ */}
+            {isImpersonated && (
+                <div className="impersonation-banner">
+                    <span className="impersonation-banner-text">
+                        <Eye size={16} />
+                        You are viewing as Super-Admin. Destructive actions are disabled.
+                    </span>
+                    <button className="impersonation-banner-btn" onClick={handleReturnToAdmin}>
+                        <ArrowLeft size={12} style={{ marginRight: '4px' }} />
+                        Return to Admin
+                    </button>
+                </div>
+            )}
             {/* ═══ TOP BAR ═══ */}
             <header className="top-navbar" role="banner">
                 {/* Left: Brand + Mobile hamburger */}

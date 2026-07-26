@@ -163,4 +163,88 @@ class ApiClient {
 }
 
 const api = new ApiClient();
+
+// ─── Super-Admin API Client ─────────────────────────────────
+const SA_API_BASE = '/api/v1/super-admin';
+
+class SuperAdminApiClient {
+    constructor() {
+        this.token = localStorage.getItem('superAdminToken');
+    }
+
+    setAuth(token) {
+        this.token = token;
+        localStorage.setItem('superAdminToken', token);
+    }
+
+    clearAuth() {
+        this.token = null;
+        localStorage.removeItem('superAdminToken');
+        localStorage.removeItem('superAdminUser');
+    }
+
+    async request(path, options = {}) {
+        const url = `${SA_API_BASE}${path}`;
+        const headers = {
+            'Content-Type': 'application/json',
+            ...(this.token && { Authorization: `Bearer ${this.token}` }),
+            ...options.headers,
+        };
+
+        const res = await fetch(url, { ...options, headers });
+
+        if (res.status === 401) {
+            this.clearAuth();
+            window.location.href = '/super-admin/login';
+            throw new Error('Session expired');
+        }
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.error || `Request failed: ${res.status}`);
+        }
+
+        return res.json();
+    }
+
+    get(path) { return this.request(path); }
+
+    post(path, data) {
+        return this.request(path, { method: 'POST', body: JSON.stringify(data) });
+    }
+
+    patch(path, data) {
+        return this.request(path, { method: 'PATCH', body: JSON.stringify(data) });
+    }
+
+    // Auth
+    login(email, password) {
+        return this.request('/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ email, password }),
+        });
+    }
+
+    // Dashboard
+    getDashboardStats() { return this.get('/dashboard'); }
+
+    // Orgs
+    getOrgs() { return this.get('/orgs'); }
+    provisionOrg(data) { return this.post('/orgs', data); }
+    updateOrgStatus(id, status, reason) {
+        return this.patch(`/orgs/${id}/status`, { status, reason });
+    }
+    impersonate(orgId, reason) {
+        return this.post(`/orgs/${orgId}/impersonate`, { reason });
+    }
+
+    // System
+    getSystemHealth() { return this.get('/system/health'); }
+    getQueueStats() { return this.get('/system/queues'); }
+    retryFailedJobs() { return this.post('/system/queues/retry'); }
+}
+
+const superAdminApi = new SuperAdminApiClient();
+
 export default api;
+export { superAdminApi };

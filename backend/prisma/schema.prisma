@@ -404,3 +404,42 @@ model VehicleSale {
   @@index([orgId])
   @@map("vehicle_sales")
 }
+
+// ─── Super-Admin Control Plane Models ────────────────────────
+
+enum SuperAdminRole {
+  SUPER_ADMIN
+  SUPPORT_ENGINEER
+}
+
+model SuperAdminUser {
+  id           String         @id @default(uuid()) @db.Uuid
+  name         String
+  email        String         @unique
+  passwordHash String
+  role         SuperAdminRole @default(SUPPORT_ENGINEER)
+  status       String         @default("active")
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  auditLogs    SuperAdminAuditLog[]
+
+  @@map("super_admin_users")
+}
+
+model SuperAdminAuditLog {
+  id              String         @id @default(uuid()) @db.Uuid
+  superAdminId    String         @db.Uuid
+  targetOrgId     String?        @db.Uuid
+  action          String
+  reason          String?
+  ipAddress       String?
+  details         Json?
+  createdAt       DateTime       @default(now())
+
+  superAdmin      SuperAdminUser @relation(fields: [superAdminId], references: [id])
+
+  @@index([superAdminId])
+  @@index([targetOrgId])
+  @@map("super_admin_audit_logs")
+}
