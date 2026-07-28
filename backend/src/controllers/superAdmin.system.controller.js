@@ -40,7 +40,7 @@ async function getSystemHealth(req, res, next) {
 
         const isHealthy = dbStatus === 'healthy' && redisStatus === 'healthy';
 
-        res.status(isHealthy ? 200 : 503).json({
+        res.json({
             status: isHealthy ? 'healthy' : 'degraded',
             timestamp: new Date().toISOString(),
             services: {
@@ -62,9 +62,11 @@ async function getQueueStats(req, res, next) {
     let queue = null;
     try {
         connection = new Redis(config.redisUrl, {
-            maxRetriesPerRequest: null,
+            maxRetriesPerRequest: 1,
             enableReadyCheck: false,
-            connectTimeout: 3000,
+            enableOfflineQueue: false,
+            connectTimeout: 2000,
+            retryStrategy: () => false,
         });
         connection.on('error', () => {}); // suppress
 
@@ -79,15 +81,19 @@ async function getQueueStats(req, res, next) {
             timestamp: new Date().toISOString(),
         });
     } catch (err) {
-        // If Redis is unreachable, return a graceful error
-        res.status(503).json({
+        // If Redis is unreachable, return a graceful response
+        res.json({
             queueName: 'finflow-jobs',
-            error: 'Unable to connect to queue: ' + err.message,
+            error: 'Unable to connect to queue: Redis server is unreachable',
             counts: null,
         });
     } finally {
-        if (queue) { try { await queue.close(); } catch { /* ignore */ } }
-        if (connection) { try { await connection.quit(); } catch { /* ignore */ } }
+        if (queue) {
+            queue.close().catch(() => {});
+        }
+        if (connection) {
+            try { connection.disconnect(); } catch { /* ignore */ }
+        }
     }
 }
 
@@ -99,9 +105,11 @@ async function retryFailedJobs(req, res, next) {
     let queue = null;
     try {
         connection = new Redis(config.redisUrl, {
-            maxRetriesPerRequest: null,
+            maxRetriesPerRequest: 1,
             enableReadyCheck: false,
-            connectTimeout: 3000,
+            enableOfflineQueue: false,
+            connectTimeout: 2000,
+            retryStrategy: () => false,
         });
         connection.on('error', () => {}); // suppress
 
@@ -135,12 +143,16 @@ async function retryFailedJobs(req, res, next) {
             totalFailed: failedJobs.length,
         });
     } catch (err) {
-        res.status(503).json({
-            error: 'Unable to retry jobs: ' + err.message,
+        res.json({
+            error: 'Unable to retry jobs: Redis server is unreachable',
         });
     } finally {
-        if (queue) { try { await queue.close(); } catch { /* ignore */ } }
-        if (connection) { try { await connection.quit(); } catch { /* ignore */ } }
+        if (queue) {
+            queue.close().catch(() => {});
+        }
+        if (connection) {
+            try { connection.disconnect(); } catch { /* ignore */ }
+        }
     }
 }
 

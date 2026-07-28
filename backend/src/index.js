@@ -61,6 +61,7 @@ function getHealthRedisClient() {
             maxRetriesPerRequest: 1,
             lazyConnect: true,
             enableReadyCheck: false,
+            retryStrategy: () => false, // Don't auto-reconnect on health check client
         });
         healthRedisClient.on('error', () => {
             // Suppress connection errors for health check client
@@ -103,11 +104,12 @@ app.get('/api/health', async (req, res) => {
 // Super-Admin Control Plane (isolated from tenant routes)
 app.use('/api/v1/super-admin', require('./routes/superAdmin.routes'));
 
+// Global Auth Routes (unscoped)
+app.use('/api/v1/auth/login', authLimiter);
+app.use('/api/v1/auth', require('./routes/auth.routes'));
+
 // Tenant API Routes
 const API_PREFIX = '/api/v1/:orgId';
-
-app.use(`${API_PREFIX}/auth/login`, authLimiter);
-app.use(`${API_PREFIX}/auth`, require('./routes/auth.routes'));
 app.use(`${API_PREFIX}/customers`, require('./routes/customer.routes'));
 app.use(`${API_PREFIX}/vehicles`, require('./routes/vehicle.routes'));
 app.use(`${API_PREFIX}/seizures`, require('./routes/seizure.routes'));

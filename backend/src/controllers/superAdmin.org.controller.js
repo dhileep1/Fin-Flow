@@ -266,4 +266,53 @@ async function getDashboardStats(req, res, next) {
     }
 }
 
-module.exports = { listOrgs, provisionOrg, updateOrgStatus, impersonate, getDashboardStats };
+async function resetUserPassword(req, res, next) {
+    try {
+        const { userId } = req.params;
+        const { newPassword, approveOnly } = req.body;
+
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        if (approveOnly) {
+            await prisma.user.update({
+                where: { id: userId },
+                data: { resetApprovedBySuperAdmin: true },
+            });
+            return res.json({ message: 'Password reset approved for user' });
+        }
+
+        if (!newPassword || newPassword.length < 8) {
+            return res.status(400).json({ error: 'New password must be at least 8 characters' });
+        }
+
+        const passwordHash = await bcrypt.hash(newPassword, 12);
+        await prisma.user.update({
+            where: { id: userId },
+            data: {
+                passwordHash,
+                resetOtp: null,
+                resetOtpExpiresAt: null,
+                resetApprovedBySuperAdmin: false,
+            },
+        });
+
+        await prisma.superAdminAuditLog.create({
+            data: {
+                superAdminId: req.user.id,
+                targetOrgId: user.orgId,
+                action: 'SUPER_ADMIN_RESET_PASSWORD',
+                ipAddress: req.ip,
+                details: { targetUserId: user.id, userEmail: user.email },
+            },
+        });
+
+        res.json({ message: 'User password reset successfully by SuperAdmin' });
+    } catch (err) {
+        next(err);
+    }
+}
+
+module.exports = { listOrgs, provisionOrg, updateOrgStatus, impersonate, getDashboardStats, resetUserPassword };

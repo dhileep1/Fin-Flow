@@ -123,6 +123,33 @@ async function getTotalPaymentsCollected(tx, orgId, loanId) {
 }
 
 /**
+ * Helper: Calculate total financial loss on seizure settlement.
+ * Loss = (Disbursed Principal + Accrued Penalty + Unpaid Interest Dues + Vehicle Expenses) - (Total Payments Collected + Sale Amount)
+ */
+async function calculateTotalSeizureLoss(tx, orgId, seizure, saleAmount) {
+    const totalCollected = await getTotalPaymentsCollected(tx, orgId, seizure.loanId);
+    const disbursed = new Prisma.Decimal(seizure.loan.disbursedAmount || seizure.loan.principalAmount);
+    const accruedPenalty = new Prisma.Decimal(seizure.loan.accruedPenalty || 0);
+
+    const unpaidDues = await tx.loanDue.aggregate({
+        where: { orgId, loanId: seizure.loanId, status: { not: 'paid' } },
+        _sum: { interestDue: true }
+    });
+    const interestDue = new Prisma.Decimal(unpaidDues._sum.interestDue || 0);
+
+    const expenses = await tx.expense.aggregate({
+        where: { orgId, vehicleId: seizure.vehicleId },
+        _sum: { amount: true }
+    });
+    const vehicleExpenses = new Prisma.Decimal(expenses._sum.amount || 0);
+
+    const totalCost = disbursed.plus(accruedPenalty).plus(interestDue).plus(vehicleExpenses);
+    const totalRecovered = totalCollected.plus(new Prisma.Decimal(saleAmount));
+
+    return Prisma.Decimal.max(new Prisma.Decimal(0), totalCost.minus(totalRecovered));
+}
+
+/**
  * Helper: Resolve or create a buyer customer.
  */
 async function resolveOrCreateBuyer(tx, orgId, buyerName, buyerPhone, buyerAddress) {
@@ -257,13 +284,8 @@ async function settleSeizure({
             }
             const newOwnerId = buyerCustomer ? buyerCustomer.id : seizure.vehicle.customerId;
 
-            // Calculate loss: disbursed - total payments collected - sale amount
-            const totalCollected = await getTotalPaymentsCollected(tx, orgId, seizure.loanId);
-            const disbursed = new Prisma.Decimal(seizure.loan.disbursedAmount || seizure.loan.principalAmount);
-            const lossAmount = Prisma.Decimal.max(
-                new Prisma.Decimal(0),
-                disbursed.minus(totalCollected).minus(new Prisma.Decimal(saleAmount))
-            );
+            // Calculate comprehensive loss: (disbursed + penalty + unpaid interest + expenses) - (total collected + sale amount)
+            const lossAmount = await calculateTotalSeizureLoss(tx, orgId, seizure, saleAmount);
 
             // Create VehicleSale record (inflow)
             const vehicleSale = await tx.vehicleSale.create({

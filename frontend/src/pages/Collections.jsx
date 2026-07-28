@@ -61,34 +61,44 @@ export default function Collections() {
     const [submittingExpense, setSubmittingExpense] = useState(false);
     const [modalError, setModalError] = useState('');
 
+    const [ledgerData, setLedgerData] = useState([]);
+    const [summaryStats, setSummaryStats] = useState({ totalInflow: 0, totalOutflow: 0, netTally: 0 });
+    const [totalCount, setTotalCount] = useState(0);
+    const [totalPages, setTotalPages] = useState(1);
+
     const fetchAllData = async () => {
         try {
-            const [paymentsData, loansData, expensesData, vehicleSalesData, orgData] = await Promise.all([
-                api.getPayments(undefined, 'limit=10000'),
-                api.getLoans('limit=1000'),
-                api.getExpenses('limit=10000'),
-                api.getVehicleSales('limit=10000'),
-                api.getOrgSettings()
-            ]);
-            setPayments(paymentsData?.payments || []);
-            setLoans(loansData?.loans || []);
-            setExpenses(expensesData?.expenses || []);
-            setVehicleSales(vehicleSalesData || []);
-            if (orgData?.settings?.startingCash !== undefined) {
-                setOpeningCashInHand(Number(orgData.settings.startingCash));
+            setLoading(true);
+            const queryParams = new URLSearchParams({
+                page: allPage,
+                limit: PAGE_SIZE,
+                tab: activeTab,
+                dateFilter: dateFilter,
+                ...(customFrom ? { fromDate: customFrom } : {}),
+                ...(customTo ? { toDate: customTo } : {}),
+                ...(searchQuery ? { search: searchQuery } : {})
+            }).toString();
+
+            const res = await api.getLedgerReport(queryParams);
+            if (res) {
+                setLedgerData(res.data || []);
+                setSummaryStats(res.summary || {});
+                setTotalCount(res.pagination?.totalItems || 0);
+                setTotalPages(res.pagination?.totalPages || 1);
+                if (res.summary?.openingCashInHand !== undefined) {
+                    setOpeningCashInHand(res.summary.openingCashInHand);
+                }
             }
         } catch (err) {
-            console.error('Failed to load collections/expenses data:', err);
+            console.error('Failed to load ledger report:', err);
+        } finally {
+            setLoading(false);
         }
     };
 
     useEffect(() => {
-        (async () => {
-            setLoading(true);
-            await fetchAllData();
-            setLoading(false);
-        })();
-    }, []);
+        fetchAllData();
+    }, [allPage, activeTab, dateFilter, customFrom, customTo, searchQuery]);
 
     // Handle submitting new expense
     const handleAddExpenseSubmit = async (e) => {
@@ -593,21 +603,6 @@ export default function Collections() {
         return tabGroups.slice(start, start + PAGE_SIZE);
     }, [tabGroups, activeTab, allPage, paymentPage, loansGivenPage, expensePage, vehicleSalePage]);
 
-    const totalCount = useMemo(() => {
-        if (aggregationLevel === 'none') {
-            if (activeTab === 'all') return flatTransactionsList.length;
-            if (activeTab === 'payments') return filteredPayments.length;
-            if (activeTab === 'loans') return filteredLoans.length;
-            if (activeTab === 'expenses') return filteredExpenses.length;
-            if (activeTab === 'vehicleSales') return filteredVehicleSales.length;
-        }
-        if (activeTab === 'all') return filteredDateGroups.length;
-        return tabGroups.length;
-    }, [aggregationLevel, activeTab, flatTransactionsList, filteredPayments, filteredLoans, filteredExpenses, filteredVehicleSales, filteredDateGroups, tabGroups]);
-
-    const totalPages = useMemo(() => {
-        return Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
-    }, [totalCount]);
 
     const startIdx = useMemo(() => {
         let page = 1;
@@ -851,8 +846,8 @@ export default function Collections() {
 
     const renderFlatTable = () => {
         if (activeTab === 'all') {
-            const txs = flatTransactionsList;
-            const pagedFlatTxs = txs.slice((allPage - 1) * PAGE_SIZE, allPage * PAGE_SIZE);
+            const txs = ledgerData;
+            const pagedFlatTxs = txs;
             return (
                 <div className="table-container p-0 border-t border-slate-200 shadow-none">
                     <table className="w-full text-sm">

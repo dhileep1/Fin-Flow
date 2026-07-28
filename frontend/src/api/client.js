@@ -80,10 +80,38 @@ class ApiClient {
     }
 
     // --- Auth ---
-    login(orgId, credentials) {
-        return this.request(`/api/v1/${orgId}/auth/login`, {
+    login(credentials) {
+        return this.request('/api/v1/auth/login', {
             method: 'POST',
             body: JSON.stringify(credentials),
+        });
+    }
+
+    requestPasswordOtp(credentials) {
+        return this.request('/api/v1/auth/forgot-password/request-otp', {
+            method: 'POST',
+            body: JSON.stringify(credentials),
+        });
+    }
+
+    verifyOtpAndReset(data) {
+        return this.request('/api/v1/auth/forgot-password/verify-otp', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
+    requestSuperAdminReset(data) {
+        return this.request('/api/v1/auth/forgot-password/request-superadmin', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
+    resetWithSuperAdminPermission(data) {
+        return this.request('/api/v1/auth/forgot-password/reset-superadmin', {
+            method: 'POST',
+            body: JSON.stringify(data),
         });
     }
 
@@ -149,11 +177,13 @@ class ApiClient {
 
     // --- Reports ---
     getCollectionsReport(from, to) { return this.get(`/reports/collections?from=${from}&to=${to}`); }
+    getLedgerReport(queryString = '') { return this.get(`/reports/ledger${queryString ? `?${queryString}` : ''}`); }
 
     // --- Admin ---
     getOrgSettings() { return this.get('/admin/settings'); }
     updateOrgSettings(data) { return this.put('/admin/settings', data); }
     getUsers() { return this.get('/admin/users'); }
+    getUser(id) { return this.get(`/admin/users/${id}`); }
     createUser(data) { return this.post('/admin/users', data); }
     updateUser(id, data) { return this.put(`/admin/users/${id}`, data); }
     getAuditLogs(page = 1, limit = 10) { return this.get(`/admin/audit-logs?page=${page}&limit=${limit}`); }

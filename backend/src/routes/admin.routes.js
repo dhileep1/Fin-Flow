@@ -113,9 +113,85 @@ router.post('/users', requireRole('admin'), async (req, res, next) => {
     } catch (err) { next(err); }
 });
 
+router.get('/users/:id', requireRole('admin'), async (req, res, next) => {
+    try {
+        const user = await prisma.user.findFirst({
+            where: { id: req.params.id, orgId: req.orgId },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                phone: true,
+                role: true,
+                status: true,
+                targets: true,
+                createdAt: true,
+            },
+        });
+
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        // Aggregate portfolio metrics for this user
+        const [
+            assignedLoansStats,
+            assignedTasksCount,
+            collectionsStats,
+            assignedLoans,
+            recentCollections,
+        ] = await Promise.all([
+            prisma.loan.aggregate({
+                where: { orgId: req.orgId, assignedStaffId: user.id, status: 'active' },
+                _count: { id: true },
+                _sum: { outstandingPrincipal: true, principalAmount: true },
+            }),
+            prisma.callTask.count({
+                where: { orgId: req.orgId, assignedStaffId: user.id },
+            }),
+            prisma.payment.aggregate({
+                where: { orgId: req.orgId, createdBy: user.id },
+                _count: { id: true },
+                _sum: { amount: true },
+            }),
+            prisma.loan.findMany({
+                where: { orgId: req.orgId, assignedStaffId: user.id },
+                take: 20,
+                orderBy: { createdAt: 'desc' },
+                include: {
+                    customer: { select: { name: true, phone: true } },
+                    vehicle: { select: { vehicleNumber: true, model: true } },
+                },
+            }),
+            prisma.payment.findMany({
+                where: { orgId: req.orgId, createdBy: user.id },
+                take: 20,
+                orderBy: { paymentDate: 'desc' },
+                include: {
+                    loan: { include: { customer: { select: { name: true } } } },
+                },
+            }),
+        ]);
+
+        res.json({
+            user,
+            metrics: {
+                assignedLoansCount: assignedLoansStats._count.id || 0,
+                assignedLoansOutstanding: Number(assignedLoansStats._sum.outstandingPrincipal || 0),
+                totalDisbursed: Number(assignedLoansStats._sum.principalAmount || 0),
+                assignedTasksCount,
+                collectionsCount: collectionsStats._count.id || 0,
+                totalCollectedAmount: Number(collectionsStats._sum.amount || 0),
+            },
+            assignedLoans,
+            recentCollections,
+        });
+    } catch (err) { next(err); }
+});
+
 router.put('/users/:id', requireRole('admin'), async (req, res, next) => {
     try {
-        const { name, phone, email, role, status, password } = req.body;
+        const { name, phone, email, role, status, password, targets } = req.body;
 
         // SEC-8: Validate role if being updated
         if (role && !ALLOWED_ROLES.includes(role)) {
@@ -125,14 +201,24 @@ router.put('/users/:id', requireRole('admin'), async (req, res, next) => {
             return res.status(400).json({ error: 'Password must be at least 8 characters' });
         }
 
-        const data = { name, phone, email, role, status };
+        const data = {};
+        if (name !== undefined) data.name = name;
+        if (phone !== undefined) data.phone = phone || null;
+        if (email !== undefined) data.email = email ? email.trim().toLowerCase() : null;
+        if (role !== undefined) data.role = role;
+        if (status !== undefined) data.status = status;
+        if (targets !== undefined) data.targets = targets;
         if (password) data.passwordHash = await bcrypt.hash(password, 12);
+
         await prisma.user.updateMany({
             where: { id: req.params.id, orgId: req.orgId },
             data,
         });
-        const user = await prisma.user.findUnique({ where: { id: req.params.id } });
-        res.json({ id: user.id, name: user.name, role: user.role, status: user.status });
+        const user = await prisma.user.findUnique({
+            where: { id: req.params.id },
+            select: { id: true, name: true, email: true, phone: true, role: true, status: true, targets: true, createdAt: true },
+        });
+        res.json(user);
     } catch (err) { next(err); }
 });
 

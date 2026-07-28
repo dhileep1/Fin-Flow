@@ -158,10 +158,10 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
             allocationDetails.push({
                 loanDueId: allocation.loanDueId,
                 dueSequence: allocation.dueSequence,
-                penalty: allocation.penalty,
-                interest: allocation.interest,
-                principal: allocation.principal,
-                total: allocation.total,
+                penalty: Number(allocation.penalty),
+                interest: Number(allocation.interest),
+                principal: Number(allocation.principal),
+                total: Number(allocation.total),
             });
         }
 
@@ -216,7 +216,7 @@ async function recordPayment({ orgId, loanId, amount, paymentMethod, referenceNu
             }
         });
 
-        const nextSeq = updatedOrg.lastReceiptSeq;
+        const nextSeq = updatedOrg?.lastReceiptSeq ?? 1;
         const shortOrgCode = org.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase().padEnd(3, 'X');
         const paddedSeq = String(nextSeq).padStart(6, '0');
         const receiptNumber = `RCP-${shortOrgCode}-${paddedSeq}`;

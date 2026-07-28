@@ -10,10 +10,10 @@ export function AuthProvider({ children }) {
     });
     const [loading, setLoading] = useState(false);
 
-    const login = async (orgId, credentials) => {
+    const login = async (credentials) => {
         setLoading(true);
         try {
-            const data = await api.login(orgId, credentials);
+            const data = await api.login(credentials);
             api.setAuth(data.token, data.user.orgId);
             localStorage.setItem('lendEasyUser', JSON.stringify(data.user));
             setUser(data.user);

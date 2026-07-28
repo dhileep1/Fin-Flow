@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -9,7 +10,7 @@ import {
 
 const PAGE_SIZE = 10;
 
-function ActionMenu({ onEditRole, onResetPassword, onDeactivate }) {
+function ActionMenu({ onCustomize, onDeactivate }) {
     const [open, setOpen] = useState(false);
     const ref = useRef(null);
 
@@ -32,11 +33,8 @@ function ActionMenu({ onEditRole, onResetPassword, onDeactivate }) {
             </button>
             {open && (
                 <div className="action-menu-dropdown">
-                    <button className="action-menu-item" onClick={() => { onEditRole(); setOpen(false); }}>
-                        <Shield size={14} /> Edit Role
-                    </button>
-                    <button className="action-menu-item" onClick={() => { onResetPassword(); setOpen(false); }}>
-                        <KeyRound size={14} /> Reset Password
+                    <button className="action-menu-item" onClick={() => { onCustomize(); setOpen(false); }}>
+                        <Edit size={14} /> Customize User
                     </button>
                     <button className="action-menu-item danger" onClick={() => { onDeactivate(); setOpen(false); }}>
                         <UserX size={14} /> Deactivate
@@ -49,6 +47,7 @@ function ActionMenu({ onEditRole, onResetPassword, onDeactivate }) {
 
 export default function AdminConfig() {
     const { user } = useAuth();
+    const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('settings');
     const [org, setOrg] = useState(null);
     const [orgForm, setOrgForm] = useState({ name: '', phone: '', address: '', startingCash: 0 });
@@ -546,8 +545,13 @@ export default function AdminConfig() {
                             </thead>
                             <tbody>
                                 {pagedUsers.map((u) => (
-                                    <tr key={u.id}>
-                                        <td style={{ fontWeight: 500 }}>{u.name}</td>
+                                    <tr 
+                                        key={u.id} 
+                                        className="hover-table-row" 
+                                        style={{ cursor: 'pointer' }}
+                                        onClick={() => navigate(`/admin/users/${u.id}`)}
+                                    >
+                                        <td style={{ fontWeight: 600 }} className="text-brand-accent">{u.name}</td>
                                         <td className="text-sm">{u.email || '—'}</td>
                                         <td className="font-mono text-sm">{u.phone || '—'}</td>
                                         <td>
@@ -556,11 +560,19 @@ export default function AdminConfig() {
                                             </span>
                                         </td>
                                         <td><span className={`badge ${u.status === 'active' ? 'badge-success' : 'badge-danger'}`}>{u.status}</span></td>
-                                        <td>
+                                        <td onClick={(e) => e.stopPropagation()}>
                                             <ActionMenu
-                                                onEditRole={() => showToast('Edit role dialog coming soon')}
-                                                onResetPassword={() => showToast('Password reset link sent')}
-                                                onDeactivate={() => showToast('User deactivated', 'danger')}
+                                                onCustomize={() => navigate(`/admin/users/${u.id}`)}
+                                                onDeactivate={async () => {
+                                                    try {
+                                                        const nextStatus = u.status === 'active' ? 'inactive' : 'active';
+                                                        await api.updateUser(u.id, { status: nextStatus });
+                                                        showToast(`User status updated to ${nextStatus}`);
+                                                        loadData();
+                                                    } catch (err) {
+                                                        showToast(err.message || 'Failed to update user', 'danger');
+                                                    }
+                                                }}
                                             />
                                         </td>
                                     </tr>

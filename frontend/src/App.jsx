@@ -12,6 +12,7 @@ import WhatsAppPanel from './pages/WhatsAppPanel';
 import Customers from './pages/Customers';
 import Reports from './pages/Reports';
 import AdminConfig from './pages/AdminConfig';
+import UserDetail from './pages/admin/UserDetail';
 import CustomerLoans from './pages/CustomerLoans';
 import Collections from './pages/Collections';
 import VehicleInventory from './pages/VehicleInventory';
@@ -77,6 +78,14 @@ function AppRoutes() {
                     element={
                         <RoleProtectedRoute allowedRoles={['admin']}>
                             <AdminConfig />
+                        </RoleProtectedRoute>
+                    } 
+                />
+                <Route 
+                    path="admin/users/:id" 
+                    element={
+                        <RoleProtectedRoute allowedRoles={['admin']}>
+                            <UserDetail />
                         </RoleProtectedRoute>
                     } 
                 />

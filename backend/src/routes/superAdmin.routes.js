@@ -21,6 +21,7 @@ router.get('/orgs', orgController.listOrgs);
 router.post('/orgs', orgController.provisionOrg);
 router.patch('/orgs/:id/status', orgController.updateOrgStatus);
 router.post('/orgs/:id/impersonate', orgController.impersonate);
+router.post('/users/:userId/reset-password', orgController.resetUserPassword);
 
 // System health & queue monitoring
 router.get('/system/health', systemController.getSystemHealth);

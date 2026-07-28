@@ -40,11 +40,15 @@ model User {
   id           String   @id @default(uuid()) @db.Uuid
   orgId        String   @map("org_id") @db.Uuid
   name         String
-  phone        String?
-  email        String?
+  phone        String?  @unique
+  email        String?  @unique
   passwordHash String?  @map("password_hash")
   role         String   // admin, staff, accountant, viewer
   status       String   @default("active")
+  targets      Json     @default("{}")
+  resetOtp     String?  @map("reset_otp")
+  resetOtpExpiresAt DateTime? @map("reset_otp_expires_at")
+  resetApprovedBySuperAdmin Boolean @default(false) @map("reset_approved_by_super_admin")
   createdAt    DateTime @default(now()) @map("created_at")
 
   org            Organization  @relation(fields: [orgId], references: [id])
@@ -56,8 +60,6 @@ model User {
   seizures       VehicleSeizure[] @relation("SeizureExecutor")
   vehicleSales   VehicleSale[]    @relation("VehicleSaleCreator")
 
-  @@unique([orgId, phone], map: "ux_users_org_phone")
-  @@unique([orgId, email], map: "ux_users_org_email")
   @@map("users")
 }
 

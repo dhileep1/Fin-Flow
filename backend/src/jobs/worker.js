@@ -20,7 +20,11 @@ function initBullMQ() {
         connection = new Redis(config.redisUrl, {
             maxRetriesPerRequest: null,
             enableReadyCheck: false,
-            connectTimeout: 5000,
+            connectTimeout: 3000,
+            retryStrategy(times) {
+                // Retry every 10 seconds silently if Redis is down
+                return 10000;
+            },
         });
 
         connection.on('error', (err) => {
@@ -104,10 +108,19 @@ function clearFallbackIntervals() {
     }
 }
 
+function hashStringToInt32(str) {
+    let hash = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+        hash ^= str.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash | 0;
+}
+
 async function withAdvisoryLock(lockKey, callback) {
     try {
-        // Simple hash to convert string key to integer for Postgres advisory lock
-        const lockId = String(lockKey).split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        // Robust 32-bit FNV-1a hash to convert string key to 32-bit signed integer for Postgres advisory lock
+        const lockId = hashStringToInt32(String(lockKey));
         await prisma.$transaction(async (tx) => {
             const result = await tx.$queryRaw`SELECT pg_try_advisory_xact_lock(${lockId})`;
             const acquired = result[0]?.pg_try_advisory_xact_lock;

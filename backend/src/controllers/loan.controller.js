@@ -10,8 +10,15 @@ async function createLoan(req, res, next) {
             return res.status(400).json({ error: 'Missing required fields: customerId, vehicleId, principalAmount, tenureMonths, monthlyInterestRate, startDate' });
         }
 
-        if (!guarantors || !Array.isArray(guarantors) || guarantors.length === 0 || !guarantors[0].name?.trim() || !guarantors[0].phone?.trim()) {
+        if (!guarantors || !Array.isArray(guarantors) || guarantors.length === 0) {
             return res.status(400).json({ error: 'Guarantor (Jamin) name and phone number are compulsory.' });
+        }
+
+        for (let i = 0; i < guarantors.length; i++) {
+            const g = guarantors[i];
+            if (!g || typeof g !== 'object' || !g.name?.trim() || !g.phone?.trim()) {
+                return res.status(400).json({ error: `Guarantor #${i + 1} must have a valid name and phone number.` });
+            }
         }
 
         const loan = await loanService.createLoan({

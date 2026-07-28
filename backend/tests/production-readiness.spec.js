@@ -158,6 +158,7 @@ describe('Production Readiness Features', () => {
                     lastReceiptSequence: 5
                 }
             });
+            mockTx.organization.update.mockResolvedValue({ lastReceiptSeq: 6 });
 
             const result = await paymentService.recordPayment({
                 orgId: 'org-1',

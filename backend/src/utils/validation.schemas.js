@@ -33,6 +33,39 @@ const loginSchema = z.object({
     }),
 });
 
+const requestOtpSchema = z.object({
+    body: z.object({
+        email: z.string().email("Invalid email format").optional(),
+        phone: z.string().min(5, "Phone number is too short").optional(),
+    }).refine((data) => data.email || data.phone, {
+        message: "Either email or phone is required",
+        path: ["email"],
+    }),
+});
+
+const verifyOtpSchema = z.object({
+    body: z.object({
+        email: z.string().email("Invalid email format").optional(),
+        phone: z.string().min(5, "Phone number is too short").optional(),
+        otp: z.string().length(6, "OTP must be 6 digits"),
+        newPassword: z.string().min(8, "New password must be at least 8 characters"),
+    }).refine((data) => data.email || data.phone, {
+        message: "Either email or phone is required",
+        path: ["email"],
+    }),
+});
+
+const requestSuperAdminResetSchema = z.object({
+    body: z.object({
+        email: z.string().email("Invalid email format").optional(),
+        phone: z.string().min(5, "Phone number is too short").optional(),
+        reason: z.string().optional(),
+    }).refine((data) => data.email || data.phone, {
+        message: "Either email or phone is required",
+        path: ["email"],
+    }),
+});
+
 // Customer schemas
 const createCustomerSchema = z.object({
     body: z.object({
@@ -222,6 +255,9 @@ const createCallLogSchema = z.object({
 
 module.exports = {
     loginSchema,
+    requestOtpSchema,
+    verifyOtpSchema,
+    requestSuperAdminResetSchema,
     createCustomerSchema,
     updateCustomerSchema,
     createVehicleSchema,
